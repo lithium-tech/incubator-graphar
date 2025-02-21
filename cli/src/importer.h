@@ -235,6 +235,9 @@ std::string DoImport(const py::dict& config_dict) {
     vertex_props_in_edges[edge.src_type].emplace_back(edge.src_prop);
     vertex_props_in_edges[edge.dst_type].emplace_back(edge.dst_prop);
   }
+
+  graphar::VertexInfoVector vertices_info;
+  std::vector<std::string> vertices_labels;
   for (const auto& vertex : import_config.import_schema.vertices) {
     vertex_chunk_sizes[vertex.type] = vertex.chunk_size;
 
@@ -266,8 +269,9 @@ std::string DoImport(const py::dict& config_dict) {
     auto vertex_info =
         graphar::CreateVertexInfo(vertex.type, vertex.chunk_size, pgs,
                                   vertex.labels, vertex.prefix, version);
-    auto file_name = vertex.type + ".vertex.yml";
+    auto file_name = vertex.type + ".vertex.yaml";
     vertex_info->Save(save_path / file_name);
+    vertices_info.push_back(vertex_info);
     auto save_path_str = save_path.string();
     save_path_str += "/";
     auto vertex_prop_writer = graphar::VertexPropertyWriter::Make(
@@ -346,8 +350,13 @@ std::string DoImport(const py::dict& config_dict) {
     auto vertex_count = merged_vertex_table->num_rows();
     vertex_counts[vertex.type] = vertex_count;
     vertex_prop_writer->WriteVerticesNum(vertex_count);
+
+    for (auto &label : vertex.labels) {
+      vertices_labels.push_back(label);
+    }
   }
 
+  graphar::EdgeInfoVector edges_info;
   for (const auto& edge : import_config.import_schema.edges) {
     auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
 
@@ -383,8 +392,9 @@ std::string DoImport(const py::dict& config_dict) {
         directed, adj_lists, pgs, edge.prefix, version);
     auto file_name =
         ConcatEdgeTriple(edge.src_type, edge.edge_type, edge.dst_type) +
-        ".edge.yml";
+        ".edge.yaml";
     edge_info->Save(save_path / file_name);
+    edges_info.push_back(edge_info);
     auto save_path_str = save_path.string();
     save_path_str += "/";
     for (const auto& adj_list : adj_lists) {
@@ -501,5 +511,10 @@ std::string DoImport(const py::dict& config_dict) {
       edge_builder->Dump();
     }
   }
+  auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
+                                              vertices_info, edges_info, vertices_labels, "./", version);
+  auto file_name = graph_info->GetName() + ".yaml";
+  graph_info->Save(save_path / file_name);
+
   return "Imported successfully!";
 }
