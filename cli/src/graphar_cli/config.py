@@ -171,8 +171,10 @@ class Edge(BaseModel):
     edge_type: str
     src_type: str
     src_prop: str
+    src_edge_prop: str = None # Field(default_factory=lambda validate_data: validate_data["src_prop"]) # pd2.10
     dst_type: str
     dst_prop: str
+    dst_edge_prop: str = None # Field(default_factory=lambda validate_data: validate_data["dst_prop"]) # pd2.10
     chunk_size: Optional[int] = None
     validate_level: Optional[Literal["no", "weak", "strong"]] = None
     adj_lists: List[AdjList] = []
@@ -199,6 +201,14 @@ class Edge(BaseModel):
                 f"{DEFAULT_REGULAR_SEPARATOR}{edge_type}"
                 f"{DEFAULT_REGULAR_SEPARATOR}{dst_type}/"
             )
+        return self
+    
+    @model_validator(mode="after")
+    def check_edge_props(self) -> Self:
+        if self.src_edge_prop is None:
+            self.src_edge_prop = self.src_prop
+        if self.dst_edge_prop is None:
+            self.dst_edge_prop = self.dst_prop
         return self
 
 

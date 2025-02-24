@@ -118,5 +118,18 @@ def validate(import_config: ImportConfig):
                     f"not found in source columns"
                 )
                 raise ValueError(msg)
+        
+        if edge.src_edge_prop not in source_values:
+            msg = (
+                f"Source property '{edge.src_edge_prop}' "
+                f"not found in edge '{edge.edge_type}'"
+            )
+            raise ValueError(msg)
+        if edge.dst_edge_prop not in source_values:
+            msg = (
+                f"Destination edge property '{edge.src_edge_prop}' "
+                f"not found in edge '{edge.edge_type}'"
+            )
+            raise ValueError(msg)
         # TODO: Validate source columns
         logger.debug("Validated edge %s %s %s", edge.src_type, edge.edge_type, edge.dst_type)

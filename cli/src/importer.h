@@ -80,8 +80,10 @@ struct Edge {
   std::string edge_type;
   std::string src_type;
   std::string src_prop;
+  std::string src_edge_prop;
   std::string dst_type;
   std::string dst_prop;
+  std::string dst_edge_prop;
   int chunk_size;
   std::string validate_level;
   std::string prefix;
@@ -158,8 +160,10 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
     edge.edge_type = edge_dict["edge_type"].cast<std::string>();
     edge.src_type = edge_dict["src_type"].cast<std::string>();
     edge.src_prop = edge_dict["src_prop"].cast<std::string>();
+    edge.src_edge_prop = edge_dict["src_edge_prop"].cast<std::string>();
     edge.dst_type = edge_dict["dst_type"].cast<std::string>();
     edge.dst_prop = edge_dict["dst_prop"].cast<std::string>();
+    edge.dst_edge_prop = edge_dict["dst_edge_prop"].cast<std::string>();
     edge.chunk_size = edge_dict["chunk_size"].cast<int>();
     edge.validate_level = edge_dict["validate_level"].cast<std::string>();
     edge.prefix = edge_dict["prefix"].cast<std::string>();
@@ -310,7 +314,7 @@ std::string DoImport(const py::dict& config_dict) {
           for (const auto& chunk : arrow_column->chunks()) {
             if (chunk->null_count() > 0) {
               throw std::runtime_error("Non-nullable column '" + column +
-                                       "' has null values");
+                                      "' has null values");
             }
           }
         }
@@ -413,7 +417,7 @@ std::string DoImport(const py::dict& config_dict) {
           column_names.emplace_back(key);
         }
         auto table = GetDataFromFile(source.path, column_names,
-                                     source.delimiter, source.file_type);
+                                    source.delimiter, source.file_type);
         std::unordered_map<std::string, graphar::Property> column_prop_map;
         std::unordered_map<std::string, std::string> reversed_columns;
         for (const auto& [key, value] : source.columns) {
@@ -428,12 +432,16 @@ std::string DoImport(const py::dict& config_dict) {
                 prop.is_primary, prop.nullable);
           }
         }
-        column_prop_map[reversed_columns.at(edge.src_prop)] =
-            vertex_prop_property_map.at(
-                std::make_pair(edge.src_type, edge.src_prop));
-        column_prop_map[reversed_columns.at(edge.dst_prop)] =
-            vertex_prop_property_map.at(
-                std::make_pair(edge.dst_type, edge.dst_prop));
+        const auto &src_prop = vertex_prop_property_map.at(std::make_pair(edge.src_type, edge.src_prop));
+        column_prop_map[reversed_columns.at(edge.src_edge_prop)] = graphar::Property(
+            edge.src_edge_prop,
+            src_prop.type,
+            src_prop.is_primary, src_prop.is_nullable);
+        const auto &dst_prop = vertex_prop_property_map.at(std::make_pair(edge.dst_type, edge.dst_prop));
+        column_prop_map[reversed_columns.at(edge.dst_edge_prop)] = graphar::Property(
+            edge.dst_edge_prop,
+            dst_prop.type,
+            dst_prop.is_primary, dst_prop.is_nullable);
         std::unordered_map<
             std::string,
             std::pair<std::string, std::shared_ptr<arrow::DataType>>>
@@ -484,9 +492,9 @@ std::string DoImport(const py::dict& config_dict) {
       const int64_t num_rows = combined_edge_table->num_rows();
       for (int64_t i = 0; i < num_rows; ++i) {
         auto edge_src_column =
-            combined_edge_table->GetColumnByName(edge.src_prop);
+            combined_edge_table->GetColumnByName(edge.src_edge_prop);
         auto edge_dst_column =
-            combined_edge_table->GetColumnByName(edge.dst_prop);
+            combined_edge_table->GetColumnByName(edge.dst_edge_prop);
 
         graphar::builder::Edge e(
             vertex_prop_index_map
@@ -496,7 +504,7 @@ std::string DoImport(const py::dict& config_dict) {
                 .at(std::make_pair(edge.dst_type, edge.dst_prop))
                 .at(edge_dst_column->GetScalar(i).ValueOrDie()));
         for (const auto& column_name : edge_column_names) {
-          if (column_name != edge.src_prop && column_name != edge.dst_prop) {
+          if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
             auto column = combined_edge_table->GetColumnByName(column_name);
             auto column_type = column->type();
             std::any value;
