@@ -32,25 +32,23 @@ Status EdgesBuilder::Dump() {
   // construct empty edge collections for vertex chunks without edges
   IdType num_vertex_chunks =
       (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
-  for (IdType i = 0; i < num_vertex_chunks; i++)
-    if (edges_.find(i) == edges_.end()) {
-      std::vector<Edge> empty_chunk_edges;
-      edges_[i] = empty_chunk_edges;
-    }
+  if (edges_.size() < num_vertex_chunks) {
+    edges_.resize(num_vertex_chunks);
+  }
   // dump the offsets
   if (adj_list_type_ == AdjListType::ordered_by_source ||
       adj_list_type_ == AdjListType::ordered_by_dest) {
-    for (auto& chunk_edges : edges_) {
-      IdType vertex_chunk_index = chunk_edges.first;
+    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
+         vertex_chunk_index++) {
       // sort the edges
       if (adj_list_type_ == AdjListType::ordered_by_source)
-        sort(chunk_edges.second.begin(), chunk_edges.second.end(), cmp_src);
+        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_src);
       if (adj_list_type_ == AdjListType::ordered_by_dest)
-        sort(chunk_edges.second.begin(), chunk_edges.second.end(), cmp_dst);
+        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_dst);
       // construct and write offset chunk
       GAR_ASSIGN_OR_RAISE(
           auto offset_table,
-          getOffsetTable(vertex_chunk_index, chunk_edges.second));
+          getOffsetTable(vertex_chunk_index, edges_[vertex_chunk_index]));
       GAR_RETURN_NOT_OK(
           writer.WriteOffsetChunk(offset_table, vertex_chunk_index));
     }
@@ -62,21 +60,17 @@ Status EdgesBuilder::Dump() {
       (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
   for (IdType vertex_chunk_index = 0; vertex_chunk_index < vertex_chunk_num;
        vertex_chunk_index++) {
-    if (edges_.find(vertex_chunk_index) == edges_.end()) {
-      GAR_RETURN_NOT_OK(writer.WriteEdgesNum(vertex_chunk_index, 0));
-    } else {
-      GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
-          vertex_chunk_index, edges_[vertex_chunk_index].size()));
+    GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
+        vertex_chunk_index, edges_[vertex_chunk_index].size()));
     }
-  }
-  // dump the edges
-  for (auto& chunk_edges : edges_) {
-    IdType vertex_chunk_index = chunk_edges.first;
+    // dump the edges
+    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
+         vertex_chunk_index++) {
     // convert to table
-    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(chunk_edges.second));
+    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
     // write table
     GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
-    chunk_edges.second.clear();
+    edges_[vertex_chunk_index].clear();
   }
   is_saved_ = true;
   return Status::OK();

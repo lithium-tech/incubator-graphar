@@ -196,6 +196,7 @@ class EdgesBuilder {
     default:
       vertex_chunk_size_ = edge_info_->GetSrcChunkSize();
     }
+    Reserve((num_vertices - 1) / vertex_chunk_size_ + 1);
   }
 
   /**
@@ -253,8 +254,24 @@ class EdgesBuilder {
     GAR_RETURN_NOT_OK(validate(e, validate_level));
     // add an edge
     IdType vertex_chunk_index = getVertexChunkIndex(e);
+    if (vertex_chunk_index >= edges_.size()) {
+      edges_.resize(vertex_chunk_index + 1);
+    }
     edges_[vertex_chunk_index].push_back(e);
     num_edges_++;
+    return Status::OK();
+  }
+
+  Status Reserve(const int64_t &reserve_count) {
+    edges_.resize(reserve_count);
+    return Status::OK();
+  }
+
+  Status PreReserve(const std::vector<int64_t> &reserve_count) {
+    edges_.resize(reserve_count.size());
+    for (int64_t i = 0; i < reserve_count.size(); i++) {
+      edges_[i].reserve(reserve_count[i]);
+    }
     return Status::OK();
   }
 
@@ -264,6 +281,8 @@ class EdgesBuilder {
    * @return The current number of edges in the collection.
    */
   IdType GetNum() const { return num_edges_; }
+
+//  IdType GetPreNum() const { return pre_num_edges_; }
 
   /**
    * @brief Dump the collection into files.
@@ -416,7 +435,7 @@ class EdgesBuilder {
   std::shared_ptr<EdgeInfo> edge_info_;
   std::string prefix_;
   AdjListType adj_list_type_;
-  std::unordered_map<IdType, std::vector<Edge>> edges_;
+  std::vector<std::vector<Edge>> edges_;
   IdType vertex_chunk_size_;
   IdType num_vertices_;
   IdType num_edges_;

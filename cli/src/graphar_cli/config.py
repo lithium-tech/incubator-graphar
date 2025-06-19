@@ -104,16 +104,16 @@ class Source(BaseModel):
     def check_path(cls, v):
         if not isinstance(v, str):
             raise ValueError(f"path must be a string, not <{type(v)}>")
-        
+
         path = Path(v)
         pattern = str(path.relative_to(path.anchor))
         files = list(Path(path.anchor).glob(pattern))
-        
+
         for file in files:
             if not file.is_file():
                 msg = f"'{file.resolve().absolute()}' is not a file."
                 raise ValueError(msg)
-            
+
         str_pathes = [str(f) for f in files]
         if not len(files):
             msg = f"files by mask '{path.resolve().absolute()}' not found."
@@ -215,7 +215,7 @@ class Edge(BaseModel):
                 f"{DEFAULT_REGULAR_SEPARATOR}{dst_type}/"
             )
         return self
-    
+
     @model_validator(mode="after")
     def check_edge_props(self) -> Self:
         if self.src_edge_prop is None:
@@ -242,6 +242,7 @@ class ImportConfig(BaseModel):
 
     graphar: GraphArConfig
     import_schema: ImportSchema
+    debug_mode: bool
 
     @model_validator(mode="after")
     def check_none_types(self) -> Self:

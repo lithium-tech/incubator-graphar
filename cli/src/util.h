@@ -19,6 +19,16 @@
 
 #pragma once
 
+#include <iostream>
+#include <sys/resource.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <fstream>
+ #include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 #ifdef ARROW_ORC
 #include "arrow/adapters/orc/adapter.h"
 #endif
@@ -59,6 +69,7 @@ std::shared_ptr<arrow::Table> SelectColumns(
     throw std::runtime_error("No column names provided.");
   }
   std::vector<int> indices;
+  indices.reserve(column_names.size());
   for (const auto& name : column_names) {
     auto column_index = table->schema()->GetFieldIndex(name);
     if (column_index != -1) {
@@ -99,6 +110,7 @@ std::shared_ptr<arrow::Table> GetDataFromParquetFile(
 
   // Map column names to their indices in the schema
   std::vector<int> column_indices;
+  column_indices.reserve(column_names.size());
   for (const auto& col_name : column_names) {
     int64_t index = schema->GetFieldIndex(col_name);
     if (index == -1) {
@@ -284,6 +296,8 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
   // Prepare vectors for new schema fields and new column data
   std::vector<std::shared_ptr<arrow::Field>> new_fields;
   std::vector<std::shared_ptr<arrow::ChunkedArray>> new_columns;
+  new_fields.reserve(num_columns);
+  new_columns.reserve(num_columns);
 
   for (int64_t i = 0; i < num_columns; ++i) {
     auto original_field = original_schema->field(i);
@@ -306,6 +320,7 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
       // If data type needs to be changed, cast each chunk
       if (type_changed) {
         std::vector<std::shared_ptr<arrow::Array>> casted_chunks;
+        casted_chunks.reserve(original_column->num_chunks());
         for (const auto& chunk : original_column->chunks()) {
           // Perform type casting using Compute API
           arrow::compute::CastOptions cast_options;
@@ -366,6 +381,12 @@ std::shared_ptr<arrow::Table> MergeTables(
   // Prepare a vector to hold all the columns from the input tables
   std::vector<std::shared_ptr<arrow::Field>> fields;
   std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+  int64_t num_columns = 0;
+  for (const auto& table : tables) {
+    num_columns += table->num_columns();
+  }
+  fields.reserve(num_columns);
+  columns.reserve(num_columns);
 
   for (const auto& table : tables) {
     for (int64_t i = 0; i < table->num_columns(); ++i) {
@@ -486,3 +507,86 @@ graphar::Status TryToCastToAny(const std::shared_ptr<graphar::DataType>& type,
   }
   return graphar::Status::OK();
 }
+
+class MemUsage {
+public:
+  MemUsage();
+  long GetMaxMemoryUsageInMb() const;
+  long GetCurrentMemoryUsageInMb() const;
+  void print(bool up = false, bool down = true) const;
+private:
+  static long GetMaxRssInKBytes();
+  static long GetCurrentRssInKBytes();
+  long max_memory_usage_, current_memory_usage_;
+};
+
+MemUsage::MemUsage() {
+  max_memory_usage_ = GetMaxRssInKBytes();
+  current_memory_usage_ = GetCurrentRssInKBytes();
+}
+
+long MemUsage::GetMaxMemoryUsageInMb() const {
+  return (GetMaxRssInKBytes() - max_memory_usage_) / 1024L;
+}
+
+long MemUsage::GetCurrentMemoryUsageInMb() const {
+  return (GetCurrentRssInKBytes() - current_memory_usage_) / 1024L;
+}
+
+long MemUsage::GetMaxRssInKBytes() {
+  long rss_value = 0;
+  rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) == 0) {
+    rss_value = usage.ru_maxrss;
+#ifdef __APPLE__
+    rss_value /= 1024L;
+#endif
+  }
+  return rss_value;
+}
+
+long MemUsage::GetCurrentRssInKBytes() {
+#if defined(__linux__)
+  std::ifstream statm("/proc/self/statm");
+  long pages_resident = 0;
+  statm.ignore(1, ' ');
+  statm >> pages_resident;
+
+  long page_size_kb = sysconf(_SC_PAGESIZE) / 1024;
+  return pages_resident * page_size_kb;
+
+#elif defined(__APPLE__)
+  mach_task_basic_info info;
+  mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                (task_info_t)&info, &infoCount) != KERN_SUCCESS)
+    return 0;
+
+  return info.resident_size / 1024;
+
+#else
+  // Платформа не поддерживается
+   return 0;
+#endif
+}
+
+void MemUsage::print(bool up, bool down) const {
+  auto max_m = GetMaxMemoryUsageInMb();
+  auto cur_m = GetCurrentMemoryUsageInMb();
+  if (!up || !down) {
+    if (up) {
+      std::cout << "------\n";
+    }
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+    if (down) {
+       std::cout << "------" << std::endl;
+    }
+  } else {
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+    std::cout << "------\n";
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+  }
+};

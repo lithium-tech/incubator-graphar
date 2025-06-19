@@ -146,6 +146,7 @@ def check(
 )
 def import_data(
     config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr config file"),
+    debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
 ):
     if not Path(config_file).is_file():
         logger.error("File not found: %s", config_file)
@@ -154,7 +155,7 @@ def import_data(
     try:
         with Path(config_file).open(encoding="utf-8") as file:
             config = yaml.safe_load(file)
-        import_config = ImportConfig(**config)
+        import_config = ImportConfig(**config, debug_mode=debug_mode)
         validate(import_config)
     except Exception as e:
         logger.error("Invalid config: %s", e)
