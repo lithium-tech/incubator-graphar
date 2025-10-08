@@ -55,7 +55,7 @@ struct PropertyGroup {
 
 struct Source {
   std::string file_type;
-  std::string path;
+  std::vector<std::string> path;
   char delimiter;
   std::unordered_map<std::string, std::string> columns;
 };
@@ -143,7 +143,7 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
     for (const auto& source_dict : source_list) {
       Source src;
       src.file_type = source_dict["file_type"].cast<std::string>();
-      src.path = source_dict["path"].cast<std::string>();
+      src.path = source_dict["path"].cast<std::vector<std::string>>();
       src.delimiter = source_dict["delimiter"].cast<char>();
       src.columns = source_dict["columns"]
                         .cast<std::unordered_map<std::string, std::string>>();
@@ -201,7 +201,7 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
     for (const auto& edge_source_dict : edge_source_list) {
       Source edge_src;
       edge_src.file_type = edge_source_dict["file_type"].cast<std::string>();
-      edge_src.path = edge_source_dict["path"].cast<std::string>();
+      edge_src.path = edge_source_dict["path"].cast<std::vector<std::string>>();
       edge_src.delimiter = edge_source_dict["delimiter"].cast<char>();
       edge_src.columns =
           edge_source_dict["columns"]
@@ -289,8 +289,16 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& [key, value] : source.columns) {
         column_names.emplace_back(key);
       }
-      auto table = GetDataFromFile(source.path, column_names, source.delimiter,
-                                   source.file_type);
+
+      std::shared_ptr<arrow::Table> table;
+      {
+        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+        for (int i = 0; i < source.path.size(); ++i) {
+          file_tables[i] = GetDataFromFile(source.path[i], column_names,
+                                           source.delimiter, source.file_type);
+        }
+        table = ConcatenateTables(file_tables).ValueOrDie();
+      }
 
       std::unordered_map<std::string, Property> column_prop_map;
       std::unordered_map<std::string, std::string> reversed_columns_config;
@@ -416,8 +424,17 @@ std::string DoImport(const py::dict& config_dict) {
         for (const auto& [key, value] : source.columns) {
           column_names.emplace_back(key);
         }
-        auto table = GetDataFromFile(source.path, column_names,
-                                     source.delimiter, source.file_type);
+
+        std::shared_ptr<arrow::Table> table;
+        {
+          std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+          for (int i = 0; i < source.path.size(); ++i) {
+            file_tables[i] = GetDataFromFile(source.path[i], column_names,
+                                             source.delimiter, source.file_type);
+          }
+          table = ConcatenateTables(file_tables).ValueOrDie();
+        }
+
         std::unordered_map<std::string, graphar::Property> column_prop_map;
         std::unordered_map<std::string, std::string> reversed_columns;
         for (const auto& [key, value] : source.columns) {

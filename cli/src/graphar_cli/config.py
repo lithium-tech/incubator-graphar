@@ -96,17 +96,30 @@ class PropertyGroup(BaseModel):
 
 class Source(BaseModel):
     file_type: Optional[FileType] = None
-    path: str
+    path: List[str]
     delimiter: str = ","
     columns: Dict[str, str]
 
-    @field_validator("path")
+    @field_validator("path", mode="before")
     def check_path(cls, v):
-        path = Path(v).resolve().absolute()
-        if not path.is_file():
-            msg = f"'{path}' is not a file."
+        if not isinstance(v, str):
+            raise ValueError(f"path must be a string, not <{type(v)}>")
+
+        path = Path(v)
+        pattern = str(path.relative_to(path.anchor))
+        files = list(Path(path.anchor).glob(pattern))
+
+        for file in files:
+            if not file.is_file():
+                msg = f"'{file.resolve().absolute()}' is not a file."
+                raise ValueError(msg)
+
+        str_paths = [str(f) for f in files]
+        if not len(files):
+            msg = f"files by mask '{path.resolve().absolute()}' not found."
             raise ValueError(msg)
-        return v
+
+        return str_paths
 
     @field_validator("delimiter")
     def check_delimiter(cls, v):
@@ -118,9 +131,9 @@ class Source(BaseModel):
     @model_validator(mode="after")
     def check_file_type(self) -> Self:
         if not self.file_type:
-            file_type = Path(self.path).suffix.removeprefix(".")
+            file_type = Path(self.path[0]).suffix.removeprefix(".")
             if file_type == "":
-                msg = f"File {self.path} has no file type suffix"
+                msg = f"File {self.path[0]} has no file type suffix"
                 raise ValueError(msg)
             if file_type not in FileType.__members__:
                 msg = f"Invalid file type '{file_type}'"
