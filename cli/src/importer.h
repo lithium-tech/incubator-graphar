@@ -530,8 +530,10 @@ std::string DoImport(const py::dict& config_dict) {
             std::any value;
             TryToCastToAny(
                 graphar::DataType::ArrowDataTypeToDataType(column_type),
-                column->chunk(0), value);
-            e.AddProperty(column_name, value);
+                column->chunk(0), value, i);
+            if (value.has_value()) {
+              e.AddProperty(column_name, value);
+            }
           }
         }
         edge_builder->AddEdge(e);
