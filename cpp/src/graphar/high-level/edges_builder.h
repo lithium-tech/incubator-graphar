@@ -116,6 +116,37 @@ class Edge {
     return (properties_.find(property) != properties_.end());
   }
 
+  /**
+   * @brief Edge's move constructor.
+   */
+  Edge(Edge&& other) noexcept
+    : src_id_(other.src_id_), dst_id_(other.dst_id_), empty_(other.empty_)
+  {
+    properties_ = std::move(other.properties_);
+  }
+
+  /**
+   * @brief Move asigment operator.
+   */
+  Edge& operator=(Edge&& other) noexcept
+  {
+    properties_ = std::move(other.properties_);
+    src_id_ = other.src_id_;
+    dst_id_ = other.dst_id_;
+    empty_ = other.empty_;
+    return *this;
+  }
+
+  /**
+   * @brief Copy constructor.
+   */
+  Edge(const Edge& other) = default;
+
+  /**
+   * @brief Copy assigment.
+   */
+  Edge& operator=(const Edge& other) = default;
+
  private:
   IdType src_id_, dst_id_;
   bool empty_;
@@ -257,7 +288,7 @@ class EdgesBuilder {
     if (vertex_chunk_index >= edges_.size()) {
       edges_.resize(vertex_chunk_index + 1);
     }
-    edges_[vertex_chunk_index].push_back(e);
+    edges_[vertex_chunk_index].push_back(std::move(e));
     num_edges_++;
     return Status::OK();
   }

@@ -33,6 +33,18 @@
 #include "util.h"
 #include <iostream>
 
+#include <unistd.h>
+#include <fstream>
+
+void logger(std::string message)
+{
+        std::ifstream statm("/proc/self/statm");
+        size_t size, resident;
+        statm >> size >> resident;
+        std::cout << "[" << resident*getpagesize()/(1024) << " Kb] " << message
+                  << std::endl;
+}
+
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
@@ -215,12 +227,11 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
     import_config.import_schema.edges.emplace_back(edge);
   }
 
-  import_config.debug_mode = config_dict["debug_mode"].cast<bool>();
-
   return import_config;
 }
 
 std::string DoImport(const py::dict& config_dict) {
+  logger("Start of import");
   MemUsage mem_usage = MemUsage();
   auto import_config = ConvertPyDictToConfig(config_dict);
 
@@ -247,21 +258,9 @@ std::string DoImport(const py::dict& config_dict) {
 
   graphar::VertexInfoVector vertices_info;
   std::vector<std::string> vertices_labels;
-  if (import_config.debug_mode) {
-      std::cout << "Importing vertices - Start" << std::endl;
-      mem_usage.print(false, true);
-  }
+  logger("Processing vertices");
   for (const auto& vertex : import_config.import_schema.vertices) {
-    if (import_config.debug_mode) {
-      std::cout << "Processing Vertex type: " << vertex.type << " - Start" << std::endl;
-      mem_usage.print(false, true);
-    }
     vertex_chunk_sizes[vertex.type] = vertex.chunk_size;
-
-    if (import_config.debug_mode) {
-      std::cout << "Processing Vertex Properties groups - Start " << std::endl;
-      mem_usage.print(false, false);
-    }
 
     auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
     std::string primary_key;
@@ -287,10 +286,6 @@ std::string DoImport(const py::dict& config_dict) {
           props, graphar::StringToFileType(pg.file_type));
       pgs.emplace_back(property_group);
     }
-    if (import_config.debug_mode) {
-      std::cout << "Processing Vertex Properties groups - Finish " << std::endl;\
-      mem_usage.print(true, true);
-    }
     auto vertex_info =
         graphar::CreateVertexInfo(vertex.type, vertex.chunk_size, pgs,
                                   vertex.labels, vertex.prefix, version);
@@ -298,23 +293,12 @@ std::string DoImport(const py::dict& config_dict) {
     vertex_info->Save(save_path / file_name);
     vertices_info.push_back(vertex_info);
 
-    if (import_config.debug_mode) {
-      std::cout << "Save Vertex info\n";
-      mem_usage.print(false, false);
-    }
     auto save_path_str = save_path.string();
     save_path_str += "/";
-    if (import_config.debug_mode) {
-      std::cout << "Create Vertex writer" << std::endl;
-    }
     auto vertex_prop_writer = graphar::VertexPropertyWriter::Make(
                                   vertex_info, save_path_str,
                                   StringToValidateLevel(vertex.validate_level))
                                   .value();
-
-    if (import_config.debug_mode) {
-      mem_usage.print(false, true);
-    }
 
     std::vector<std::shared_ptr<arrow::Table>> vertex_tables;
     for (const auto& source : vertex.sources) {
@@ -323,10 +307,6 @@ std::string DoImport(const py::dict& config_dict) {
         column_names.emplace_back(key);
       }
 
-      if (import_config.debug_mode) {
-        std::cout << "Reading Vertex files - Start" << std::endl;
-        mem_usage.print(false, false);
-      }
       std::shared_ptr<arrow::Table> table;
       {
         std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
@@ -334,21 +314,9 @@ std::string DoImport(const py::dict& config_dict) {
           file_tables[i] = GetDataFromFile(source.path[i], column_names, source.delimiter,
                             source.file_type);
         }
-        if (import_config.debug_mode) {
-          std::cout << "Reading Vertex files - Finish\n";
-          mem_usage.print(true, true);
-          std::cout << "Concatenate Tables" << std::endl;
-        }
         table = ConcatenateTables(file_tables).ValueOrDie();
-        if (import_config.debug_mode) {
-          mem_usage.print(false, false);
-        }
       }
-      if (import_config.debug_mode) {
-        std::cout << "Clear Vertex file tables" << std::endl;
-        mem_usage.print(true, true);
-        std::cout << "Parse columns to change" << std::endl;
-      }
+
       std::unordered_map<std::string, Property> column_prop_map;
       std::unordered_map<std::string, std::string> reversed_columns_config;
       for (const auto& [key, value] : source.columns) {
@@ -382,24 +350,8 @@ std::string DoImport(const py::dict& config_dict) {
               std::make_pair(prop.name, arrow_data_type);
         }
       }
-      if (import_config.debug_mode) {
-        mem_usage.print(false, false);
-        std::cout << "Change columns Vertex" << std::endl;
-      }
       table = ChangeNameAndDataType(table, columns_to_change);
-      if (import_config.debug_mode) {
-        mem_usage.print(true, true);
-        std::cout << "Add Vertex table" << std::endl;
-      }
       vertex_tables.push_back(table);
-      if (import_config.debug_mode) {
-        mem_usage.print(false, true);
-        std::cout << "Finish source" << std::endl;
-      }
-    }
-    if (import_config.debug_mode) {
-      mem_usage.print(true, false);
-      std::cout << "Merge vertex table" << std::endl;
     }
     std::shared_ptr<arrow::Table> merged_vertex_table =
         MergeTables(vertex_tables);
@@ -407,90 +359,39 @@ std::string DoImport(const py::dict& config_dict) {
     // TODO: add start_index in config
     graphar::IdType start_chunk_index = 0;
 
-    if (import_config.debug_mode) {
-      mem_usage.print(false, false);
-      std::cout << "Add Index Column" << std::endl;
-    }
     auto vertex_table_with_index =
         vertex_prop_writer
             ->AddIndexColumn(merged_vertex_table, start_chunk_index,
                              vertex_info->GetChunkSize())
             .value();
-    if (import_config.debug_mode) {
-      mem_usage.print(true, true);
-      std::cout << "Writing Vertex - Start" << std::endl;
-    }
+
     for (const auto& property_group : pgs) {
-      if (import_config.debug_mode) {
-        std::cout << "Property group: " << property_group->GetPrefix() << '\n';
-      }
       vertex_prop_writer->WriteTable(vertex_table_with_index, property_group,
                                      start_chunk_index);
-      if (import_config.debug_mode) {
-        mem_usage.print(false, true);
-      }
     }
     auto vertex_count = merged_vertex_table->num_rows();
     vertex_counts[vertex.type] = vertex_count;
     vertex_prop_writer->WriteVerticesNum(vertex_count);
-    if (import_config.debug_mode) {
-      std::cout << "Save Vertex count: " << vertex_count << std::endl;
-      mem_usage.print(false, true);
-    }
-    if (import_config.debug_mode) {
-      std::cout << "Writing Vertex - Finish" << std::endl;
-      mem_usage.print(false, true);
-    }
     for (auto &label : vertex.labels) {
       vertices_labels.push_back(label);
     }
     if (vertex_props_in_edges.find(vertex.type) !=
         vertex_props_in_edges.end()) {
-      if (import_config.debug_mode) {
-        std::cout << "Edges2Vertex property map - Start" << std::endl;
-      }
       for (const auto& vertex_prop : vertex_props_in_edges[vertex.type]) {
-        if (import_config.debug_mode) {
-          std::cout << "Map property: " << vertex_prop << std::endl;
-        }
         if (vertex_prop_index_map.find(std::make_pair(vertex.type, vertex_prop)) == vertex_prop_index_map.end()) {
           vertex_prop_index_map[std::make_pair(vertex.type, vertex_prop)] =
               TableToUnorderedMap(vertex_table_with_index, vertex_prop,
                                   graphar::GeneralParams::kVertexIndexCol);
-        } else if (import_config.debug_mode) {
-          std::cout << "- Duplicate property SKIP\n";
-        }
-        if (import_config.debug_mode) {
-          mem_usage.print(false, true);
         }
       }
-      if (import_config.debug_mode) {
-        std::cout << "Edges2Vertex property map - Finish\n";
-        mem_usage.print(false, true);
-      }
-    }
-    if (import_config.debug_mode) {
-      std::cout << "Processing Vertex type: " << vertex.type << " - Finish\n";
-      mem_usage.print(false, true);
     }
   }
-  if (import_config.debug_mode) {
-    std::cout << "Importing vertices - Finish\n";
-    mem_usage.print(false, false);
-    std::cout << "Importing edges - Start" << std::endl;
-  }
+
+  logger("Procissing edges");
   graphar::EdgeInfoVector edges_info;
   for (const auto& edge : import_config.import_schema.edges) {
-    if (import_config.debug_mode) {
-      std::cout << "Processing Edge type: " << edge.edge_type << " - Start\n";
-      mem_usage.print(false, true);
-    }
     auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
 
-    if (import_config.debug_mode) {
-      std::cout << "Parse Edge Properties groups - Start " << std::endl;
-      mem_usage.print(false, true);
-    }
     for (const auto& pg : edge.property_groups) {
       std::vector<graphar::Property> props;
       for (const auto& prop : pg.properties) {
@@ -503,11 +404,6 @@ std::string DoImport(const py::dict& config_dict) {
           props, graphar::StringToFileType(pg.file_type));
       pgs.push_back(property_group);
     }
-    if (import_config.debug_mode) {
-      std::cout << "Parse Edge Properties groups - Finish\n";
-      mem_usage.print(true, true);
-      std::cout << "Parse Edge Adjacent List - Start" << std::endl;
-    }
     graphar::AdjacentListVector adj_lists;
     for (const auto& adj_list : edge.adj_lists) {
       // TODO: add prefix parameter in config
@@ -515,10 +411,6 @@ std::string DoImport(const py::dict& config_dict) {
           graphar::OrderedAlignedToAdjListType(adj_list.ordered,
                                                adj_list.aligned_by),
           graphar::StringToFileType(adj_list.file_type)));
-    }
-    if (import_config.debug_mode) {
-      std::cout << "Parse Edge Adjacent List - Finish " << std::endl;
-      mem_usage.print(false, true);
     }
 
     // TODO: add directed parameter in config
@@ -535,10 +427,6 @@ std::string DoImport(const py::dict& config_dict) {
         ".edge.yaml";
     edge_info->Save(save_path / file_name);
     edges_info.push_back(edge_info);
-    if (import_config.debug_mode) {
-      std::cout << "Saved Edge info" << std::endl;
-      mem_usage.print(false, true);
-    }
     auto save_path_str = save_path.string();
     save_path_str += "/";
 
@@ -548,17 +436,6 @@ std::string DoImport(const py::dict& config_dict) {
     int64_t to_chunk_size = vertex_chunk_sizes[edge.dst_type];
     bool first_adj = true;
     for (const auto& adj_list : adj_lists) {
-      if (import_config.debug_mode) {
-        std::cout << "Processing Adjacent List: ";
-
-        if (adj_list->GetType() == graphar::AdjListType::ordered_by_source) {
-          std::cout << "ordered_by_source";
-        } else if (adj_list->GetType() == graphar::AdjListType::ordered_by_dest) {
-          std::cout << "ordered_by_dest";
-        }
-        std::cout << "- Start" << std::endl;
-        mem_usage.print(false, true);
-      }
 
       int64_t vertex_count;
       if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
@@ -574,10 +451,6 @@ std::string DoImport(const py::dict& config_dict) {
         for (const auto& [key, value] : source.columns) {
           column_names.emplace_back(key);
         }
-        if (import_config.debug_mode) {
-          std::cout << "Reading Edge files - Start" << std::endl;
-          mem_usage.print(false, true);
-        }
 
         std::shared_ptr<arrow::Table> table;
         {
@@ -586,20 +459,9 @@ std::string DoImport(const py::dict& config_dict) {
             file_tables[i] = GetDataFromFile(source.path[i], column_names,
                                              source.delimiter, source.file_type);
           }
-          if (import_config.debug_mode) {
-            std::cout << "Reading Edge files - Finish\n";
-            mem_usage.print(true, true);
-            std::cout << "Concatenate Tables" << std::endl;
-          }
           table = ConcatenateTables(file_tables).ValueOrDie();
-          if (import_config.debug_mode) {
-            mem_usage.print(false, false);
-          }
         }
-        if (import_config.debug_mode) {
-          std::cout << "Clear Edge file tables" << std::endl;
-          mem_usage.print(false, true);
-        }
+
         std::unordered_map<std::string, graphar::Property> column_prop_map;
         std::unordered_map<std::string, std::string> reversed_columns;
         for (const auto& [key, value] : source.columns) {
@@ -614,10 +476,7 @@ std::string DoImport(const py::dict& config_dict) {
                 prop.is_primary, prop.nullable);
           }
         }
-        if (import_config.debug_mode) {
-          std::cout << "Properties map created" << std::endl;
-          mem_usage.print(false, false);
-        }
+
         const auto &src_prop = vertex_prop_property_map.at(std::make_pair(edge.src_type, edge.src_prop));
         column_prop_map[reversed_columns.at(edge.src_edge_prop)] = graphar::Property(
             edge.src_edge_prop,
@@ -628,11 +487,7 @@ std::string DoImport(const py::dict& config_dict) {
             edge.dst_edge_prop,
             dst_prop.type,
             dst_prop.is_primary, dst_prop.is_nullable);
-        if (import_config.debug_mode) {
-          std::cout << "Added src and dst edge properties" << std::endl;
-          mem_usage.print(true, true);
-          std::cout << "Processing columns_to_change" << std::endl;
-        }
+
         std::unordered_map<
             std::string,
             std::pair<std::string, std::shared_ptr<arrow::DataType>>>
@@ -656,35 +511,17 @@ std::string DoImport(const py::dict& config_dict) {
                 std::make_pair(prop.name, arrow_data_type);
           }
         }
-        if (import_config.debug_mode) {
-          mem_usage.print(false, false);
-          std::cout << "Change columns edge" << std::endl;
-        }
         table = ChangeNameAndDataType(table, columns_to_change);
         edge_tables.push_back(table);
-        if (import_config.debug_mode) {
-          mem_usage.print(false, true);
-        }
       }
       std::unordered_map<
           std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
           vertex_columns_to_change;
-      if (import_config.debug_mode) {
-        mem_usage.print(true, false);
-        std::cout << "Merge edge table" << std::endl;
-      }
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
       // TODO: check all fields in props
-      if (import_config.debug_mode) {
-        mem_usage.print(true, false);
-        std::cout << "Merge CombineChunks" << std::endl;
-      }
       auto combined_edge_table =
           merged_edge_table->CombineChunks().ValueOrDie();
-      if (import_config.debug_mode) {
-        mem_usage.print(false, true);
-      }
 
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
@@ -692,29 +529,12 @@ std::string DoImport(const py::dict& config_dict) {
               StringToValidateLevel(edge.validate_level))
               .value();
 
-      if (import_config.debug_mode) {
-        std::cout << "Edge columns:";
-      }
       std::vector<std::string> edge_column_names;
       for (const auto& field : combined_edge_table->schema()->fields()) {
         edge_column_names.push_back(field->name());
-        if (import_config.debug_mode) {
-          std::cout << ' ' << field->name();
-        }
       }
       const int64_t num_rows = combined_edge_table->num_rows();
 
-      if (import_config.debug_mode) {
-        std::cout << "\nAdding edges - Start\n";
-        mem_usage.print(false, true);
-        std::cout << "Prop:";
-        for (const auto& column_name : edge_column_names) {
-          if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
-            std::cout << ' ' << column_name;
-          }
-        }
-        std::cout << '\n';
-      }
       if (first_adj) {
         first_adj = false;
         for (int64_t i = 0; i < num_rows; ++i) {
@@ -730,13 +550,6 @@ std::string DoImport(const py::dict& config_dict) {
           to_sizes[vertex_prop_index_map
                            .at(std::make_pair(edge.dst_type, edge.dst_prop))
                            .at(edge_dst_column->GetScalar(i).ValueOrDie()) / to_chunk_size]++;
-          if (import_config.debug_mode && (i % 100000000 == 0)) {
-            std::cout << "PreCalc " << i + 1 << "/" << num_rows << std::endl;
-          }
-        }
-        if (import_config.debug_mode) {
-          std::cout << "Preprocess: " << from_sizes.size() << " chunks\n";
-          mem_usage.print(false, true);
         }
       }
 
@@ -745,11 +558,6 @@ std::string DoImport(const py::dict& config_dict) {
         edge_builder->PreReserve(from_sizes);
       } else {
         edge_builder->PreReserve(to_sizes);
-      }
-
-      if (import_config.debug_mode) {
-        std::cout << "Reserved edges\n";
-        mem_usage.print(false, true);
       }
 
       for (int64_t i = 0; i < num_rows; ++i) {
@@ -778,44 +586,18 @@ std::string DoImport(const py::dict& config_dict) {
             }
           }
         }
-        if (import_config.debug_mode) {
-          if (i % 10000000 == 0) {
-            mem_usage.print(true, false);
-            std::cout << "Add " << i + 1 << "/" << num_rows << "\n";
-          }
-        }
+        if (i % 10000000 == 0)
+          logger("Added to edge_builder (before): "+std::to_string(i+1)+"/"+std::to_string(num_rows)); //[My]
         edge_builder->AddEdge(e);
-        if (import_config.debug_mode && (i % 10000000 == 0)) {
-          mem_usage.print(false, true);
-        }
       }
-      if (import_config.debug_mode) {
-        std::cout << "Adding edges - Finish" << std::endl;
-        mem_usage.print(false, true);
-        std::cout << "Dump edge" << edge.edge_type << std::endl;
-        mem_usage.print();
-      }
-
       edge_builder->Dump();
-
-      if (import_config.debug_mode) {
-        std::cout << "Processing Adjacent List - Finish\n";
-        mem_usage.print(false, true);
-      }
     }
-    if (import_config.debug_mode) {
-      std::cout << "Processing Edge type: " << edge.edge_type << " - Finish" << std::endl;
-      mem_usage.print(false, true);
-    }
-  }
-  if (import_config.debug_mode) {
-    std::cout << "Importing edges - Finish\n";
-    mem_usage.print(false, true);
   }
   auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
                                               vertices_info, edges_info, vertices_labels, "./", version);
   auto file_name = graph_info->GetName() + ".yaml";
   graph_info->Save(save_path / file_name);
+  logger("Finish");
 
   return "Imported successfully!";
 }
