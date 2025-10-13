@@ -35,6 +35,7 @@
 
 #include <unistd.h>
 #include <fstream>
+#include <malloc.h>
 
 void logger(std::string message)
 {
@@ -390,8 +391,10 @@ std::string DoImport(const py::dict& config_dict) {
   logger("Procissing edges");
   graphar::EdgeInfoVector edges_info;
   for (const auto& edge : import_config.import_schema.edges) {
-    auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
+    logger("Processing edge <"+edge.edge_type+">: start");
 
+    auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
+    
     for (const auto& pg : edge.property_groups) {
       std::vector<graphar::Property> props;
       for (const auto& prop : pg.properties) {
@@ -404,6 +407,7 @@ std::string DoImport(const py::dict& config_dict) {
           props, graphar::StringToFileType(pg.file_type));
       pgs.push_back(property_group);
     }
+    logger("  edge <"+edge.edge_type+">Property groups: end ("+std::to_string(edge.property_groups.size())+" processed)");
     graphar::AdjacentListVector adj_lists;
     for (const auto& adj_list : edge.adj_lists) {
       // TODO: add prefix parameter in config
@@ -412,7 +416,7 @@ std::string DoImport(const py::dict& config_dict) {
                                                adj_list.aligned_by),
           graphar::StringToFileType(adj_list.file_type)));
     }
-
+    logger("  edge <"+edge.edge_type+"> Adj list: end");
     // TODO: add directed parameter in config
 
     bool directed = true;
@@ -430,10 +434,14 @@ std::string DoImport(const py::dict& config_dict) {
     auto save_path_str = save_path.string();
     save_path_str += "/";
 
+    logger("edge <"+edge.edge_type+">.yaml saved");
+
     std::vector<int64_t> from_sizes((vertex_counts[edge.src_type] - 1) / vertex_chunk_sizes[edge.src_type] + 1);
     int64_t from_chunk_size = vertex_chunk_sizes[edge.src_type];
     std::vector<int64_t> to_sizes((vertex_counts[edge.dst_type] - 1) / vertex_chunk_sizes[edge.dst_type] + 1);
     int64_t to_chunk_size = vertex_chunk_sizes[edge.dst_type];
+    
+    logger("edge <"+edge.edge_type+"> adjacent list: start");
     bool first_adj = true;
     for (const auto& adj_list : adj_lists) {
 
@@ -447,6 +455,8 @@ std::string DoImport(const py::dict& config_dict) {
       std::vector<std::shared_ptr<arrow::Table>> edge_tables;
 
       for (const auto& source : edge.sources) {
+        logger("edge <"+edge.edge_type+"> reading files: start");
+
         std::vector<std::string> column_names;
         for (const auto& [key, value] : source.columns) {
           column_names.emplace_back(key);
@@ -460,6 +470,7 @@ std::string DoImport(const py::dict& config_dict) {
                                              source.delimiter, source.file_type);
           }
           table = ConcatenateTables(file_tables).ValueOrDie();
+          logger("edge <"+edge.edge_type+"> tables concatenated");
         }
 
         std::unordered_map<std::string, graphar::Property> column_prop_map;
@@ -476,6 +487,7 @@ std::string DoImport(const py::dict& config_dict) {
                 prop.is_primary, prop.nullable);
           }
         }
+        logger("edge <"+edge.edge_type+"> property groups: end");
 
         const auto &src_prop = vertex_prop_property_map.at(std::make_pair(edge.src_type, edge.src_prop));
         column_prop_map[reversed_columns.at(edge.src_edge_prop)] = graphar::Property(
@@ -512,13 +524,16 @@ std::string DoImport(const py::dict& config_dict) {
           }
         }
         table = ChangeNameAndDataType(table, columns_to_change);
+        logger("edge <"+edge.edge_type+"> table columns changed");
         edge_tables.push_back(table);
+        logger("edge <"+edge.edge_type+"> table added");
       }
       std::unordered_map<
           std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
           vertex_columns_to_change;
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
+      logger("Tables merged");
       // TODO: check all fields in props
       auto combined_edge_table =
           merged_edge_table->CombineChunks().ValueOrDie();
@@ -528,11 +543,13 @@ std::string DoImport(const py::dict& config_dict) {
               edge_info, save_path_str, adj_list->GetType(), vertex_count,
               StringToValidateLevel(edge.validate_level))
               .value();
+      logger("Edge_builder created"); 
 
       std::vector<std::string> edge_column_names;
       for (const auto& field : combined_edge_table->schema()->fields()) {
         edge_column_names.push_back(field->name());
       }
+
       const int64_t num_rows = combined_edge_table->num_rows();
 
       if (first_adj) {
@@ -552,6 +569,7 @@ std::string DoImport(const py::dict& config_dict) {
                            .at(edge_dst_column->GetScalar(i).ValueOrDie()) / to_chunk_size]++;
         }
       }
+      logger("Vectors ["+std::to_string(from_sizes.size())+"] and ["+std::to_string(to_sizes.size())+"] created.");
 
       if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
           adj_list->GetType() == graphar::AdjListType::unordered_by_source) {
@@ -559,7 +577,9 @@ std::string DoImport(const py::dict& config_dict) {
       } else {
         edge_builder->PreReserve(to_sizes);
       }
+      logger("Reserved space for edge_builder.");
 
+      logger("Edge building: start");
       for (int64_t i = 0; i < num_rows; ++i) {
         auto edge_src_column =
             combined_edge_table->GetColumnByName(edge.src_edge_prop);
@@ -587,17 +607,27 @@ std::string DoImport(const py::dict& config_dict) {
           }
         }
         if (i % 10000000 == 0)
+        {
           logger("Added to edge_builder (before): "+std::to_string(i+1)+"/"+std::to_string(num_rows)); //[My]
+        }
+        if (i % 100000000 == 0)
+        {
+          std::cout << "------------------" << std::endl;
+          malloc_stats();
+          std::cout << "------------------" << std::endl;
+        }
         edge_builder->AddEdge(e);
       }
       edge_builder->Dump();
     }
   }
+
+  logger("CreateGraphInfo: start");
   auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
                                               vertices_info, edges_info, vertices_labels, "./", version);
   auto file_name = graph_info->GetName() + ".yaml";
   graph_info->Save(save_path / file_name);
-  logger("Finish");
+  logger("Save: end");
 
   return "Imported successfully!";
 }

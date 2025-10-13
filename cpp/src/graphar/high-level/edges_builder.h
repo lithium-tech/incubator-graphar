@@ -32,6 +32,8 @@
 #include "graphar/graph_info.h"
 #include "graphar/types.h"
 
+#include <iostream> //[My]
+
 namespace arrow {
 class Array;
 }
@@ -287,8 +289,9 @@ class EdgesBuilder {
     IdType vertex_chunk_index = getVertexChunkIndex(e);
     if (vertex_chunk_index >= edges_.size()) {
       edges_.resize(vertex_chunk_index + 1);
+      std::cout << "!!! resized edges_ in AddEdge()" << std::endl;
     }
-    edges_[vertex_chunk_index].push_back(std::move(e));
+    edges_[vertex_chunk_index].push_back(e); //std::move  ??? 
     num_edges_++;
     return Status::OK();
   }
