@@ -26,6 +26,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+//#include <boost/container/flat_map.hpp> //[My]
+//#include <flat_map> //[My]
 
 #include "graphar/arrow/chunk_writer.h"
 #include "graphar/fwd.h"
@@ -86,6 +88,16 @@ class Edge {
   inline void AddProperty(const std::string& name, const std::any& val) {
     empty_ = false;
     properties_[name] = val;
+  }
+
+  /**
+   * @brief Reserve properties_
+   * 
+   * @param size The size of properties_.
+   */
+  void Reserve(size_t size)
+  {
+    properties_.reserve(size);
   }
 
   /**

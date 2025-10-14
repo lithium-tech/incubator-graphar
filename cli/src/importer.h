@@ -32,6 +32,8 @@
 
 #include "util.h"
 #include <iostream>
+#include <cxxabi.h>  // !!!
+#include <set> // !!!
 
 #include <unistd.h>
 #include <fstream>
@@ -389,6 +391,7 @@ std::string DoImport(const py::dict& config_dict) {
   }
 
   logger("Procissing edges");
+  std::set<std::string> all_types;  // !!! debug container to figure out what types are we working with
   graphar::EdgeInfoVector edges_info;
   for (const auto& edge : import_config.import_schema.edges) {
     logger("Processing edge <"+edge.edge_type+">: start");
@@ -605,6 +608,7 @@ std::string DoImport(const py::dict& config_dict) {
                 graphar::DataType::ArrowDataTypeToDataType(column_type),
                 column->chunk(0), value, i);
             if (value.has_value()) {
+              all_types.insert(value.type().name());
               e.AddProperty(column_name, value);
             }
           }
@@ -624,6 +628,12 @@ std::string DoImport(const py::dict& config_dict) {
       edge_builder->Dump();
     }
   }
+
+  for(const auto& type : all_types)
+  {
+    std::cout << abi::__cxa_demangle(type.c_str(), nullptr, nullptr, nullptr) << "; ";
+  }
+  std::cout << std::endl;
 
   logger("CreateGraphInfo: start");
   auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
