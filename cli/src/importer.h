@@ -592,7 +592,10 @@ std::string DoImport(const py::dict& config_dict) {
                 .at(edge_src_column->GetScalar(i).ValueOrDie()),
             vertex_prop_index_map
                 .at(std::make_pair(edge.dst_type, edge.dst_prop))
-                .at(edge_dst_column->GetScalar(i).ValueOrDie()));
+                .at(edge_dst_column->GetScalar(i).ValueOrDie()));  
+                
+        //[My] записать все в вектор пар, отсортировать единожды, потом создать ребро
+        e.Reserve(edge_column_names.size());  //overhead reserving 
         for (const auto& column_name : edge_column_names) {
           if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
             auto column = combined_edge_table->GetColumnByName(column_name);
