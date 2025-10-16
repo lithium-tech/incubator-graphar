@@ -28,6 +28,7 @@
 #include <vector>
 //#include <boost/container/flat_map.hpp> //[My]
 //#include <flat_map> //[My]
+#include <set>
 
 #include "graphar/arrow/chunk_writer.h"
 #include "graphar/fwd.h"
@@ -35,6 +36,7 @@
 #include "graphar/types.h"
 
 #include <iostream> //[My]
+#include <string_view>  //[My]
 
 namespace arrow {
 class Array;
@@ -85,9 +87,12 @@ class Edge {
    * @param val The value of the property.
    */
   // TODO(@acezen): Enable the property to be a vector(list).
-  inline void AddProperty(const std::string& name, const std::any& val) {
+  inline void AddProperty(std::string_view name, const std::any& val) {
+    size_t cur_size = properties_.bucket_count(); // !!! Костыль
     empty_ = false;
     properties_[name] = val;
+    if (properties_.bucket_count() > cur_size)  // !!! Костыль
+      std::cout << "rehashing!!!" << std::endl; // !!! Костыль
   }
 
   /**
@@ -115,7 +120,7 @@ class Edge {
    *
    * @return The map containing all properties of the edge.
    */
-  inline const std::unordered_map<std::string, std::any>& GetProperties()
+  inline const std::unordered_map<std::string_view, std::any>& GetProperties()
       const {
     return properties_;
   }
@@ -164,7 +169,7 @@ class Edge {
  private:
   IdType src_id_, dst_id_;
   bool empty_;
-  std::unordered_map<std::string, std::any> properties_;
+  std::unordered_map<std::string_view, std::any> properties_;
 };
 
 /**
@@ -386,6 +391,38 @@ class EdgesBuilder {
                 validate_level);
   }
 
+  /**
+   * @brief add column name to the set of column names, so we can have std::string_view of it instead of copy
+   * 
+   * @param column_name The name of the column
+   */
+  void AddColumnName(const std::string& column_name)
+  {
+    column_names_.insert(column_name);
+  }
+
+  /**
+   * @brief given a column name, return a string_view on it
+   * 
+   * @param column_name the name of the column
+   */
+  std::string_view GetColumnName(const std::string& column_name)
+  {
+      if (column_names_.find(column_name) == column_names_.end())  // if we do not have this name, we should add it
+      {
+          AddColumnName(column_name);
+      }
+      return std::string_view{*column_names_.find(column_name)};
+  }
+
+  const std::string& GetColumnName(std::string_view column_name) const
+  {
+      auto it = column_names_.find(column_name);
+      if (it == column_names_.end())
+        return nullptr;
+      return *it;
+  }
+
  private:
   /**
    * @brief Get the vertex chunk index of a given edge.
@@ -487,6 +524,30 @@ class EdgesBuilder {
   IdType num_edges_;
   bool is_saved_;
   ValidateLevel validate_level_;
+
+  struct StringComparator{
+    using is_transparent = void;
+
+    bool operator()(const std::string& a, const std::string& b) const noexcept
+    {
+      return a < b;
+    }
+
+    bool operator()(std::string_view a, const std::string& b) const noexcept
+    {
+      std::cout << "Comparing view, string\n";
+      return a < b;
+    }
+
+    bool operator()(const std::string& a, std::string_view b) const noexcept
+    {
+      std::cout << "Comparing string, view\n";
+      return a < b;
+    }
+  };
+  std::set<std::string, StringComparator> column_names_;  // we store all possible column names here, so we don't have to store multiple copies of them
+  bool InOrder = true;                  // DEBUG: for later usage of vector 
+
 };
 
 }  // namespace graphar::builder

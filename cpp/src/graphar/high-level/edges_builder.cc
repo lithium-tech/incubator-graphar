@@ -102,14 +102,16 @@ Status EdgesBuilder::validate(const Edge& e,
   // strong validate
   if (validate_level == ValidateLevel::strong_validate) {
     for (auto& property : e.GetProperties()) {
+
+      const std::string& str_property = GetColumnName(property.first);
       // check if the property is contained
-      if (!edge_info_->HasProperty(property.first)) {
-        return Status::KeyError("Property with name ", property.first,
+      if (!edge_info_->HasProperty(str_property)) {
+        return Status::KeyError("Property with name ", str_property,
                                 " is not contained in the ",
                                 edge_info_->GetEdgeType(), " edge info.");
       }
       // check if the property type is correct
-      auto type = edge_info_->GetPropertyType(property.first).value();
+      auto type = edge_info_->GetPropertyType(str_property).value();
       bool invalid_type = false;
       switch (type->id()) {
       case Type::BOOL:
@@ -167,7 +169,7 @@ Status EdgesBuilder::validate(const Edge& e,
       }
       if (invalid_type) {
         return Status::TypeError(
-            "Invalid data type for property ", property.first + ", defined as ",
+            "Invalid data type for property ", str_property + ", defined as ",
             type->ToTypeName(), ", but got ", property.second.type().name());
       }
     }

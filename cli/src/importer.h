@@ -34,6 +34,7 @@
 #include <iostream>
 #include <cxxabi.h>  // !!!
 #include <set> // !!!
+#include <string_view>
 
 #include <unistd.h>
 #include <fstream>
@@ -392,6 +393,7 @@ std::string DoImport(const py::dict& config_dict) {
 
   logger("Procissing edges");
   std::set<std::string> all_types;  // !!! debug container to figure out what types are we working with
+  std::set<std::string> all_prop_names; // !!! debug
   graphar::EdgeInfoVector edges_info;
   for (const auto& edge : import_config.import_schema.edges) {
     logger("Processing edge <"+edge.edge_type+">: start");
@@ -600,6 +602,8 @@ std::string DoImport(const py::dict& config_dict) {
         //[My] записать все в вектор пар, отсортировать единожды, потом создать ребро
         e.Reserve(edge_column_names.size());  //overhead reserving 
         for (const auto& column_name : edge_column_names) {
+          all_prop_names.insert(column_name); // DEBUG collecting all strings
+
           if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
             auto column = combined_edge_table->GetColumnByName(column_name);
             auto column_type = column->type();
@@ -608,13 +612,15 @@ std::string DoImport(const py::dict& config_dict) {
                 graphar::DataType::ArrowDataTypeToDataType(column_type),
                 column->chunk(0), value, i);
             if (value.has_value()) {
-              all_types.insert(value.type().name());
-              e.AddProperty(column_name, value);
+              all_types.insert(value.type().name()); // DEBUG
+              edge_builder->AddColumnName(column_name);
+              e.AddProperty(edge_builder->GetColumnName(column_name), value);  
             }
           }
         }
         if (i % 10000000 == 0)
         {
+          std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
           logger("Added to edge_builder (before): "+std::to_string(i+1)+"/"+std::to_string(num_rows)); //[My]
         }
         if (i % 100000000 == 0)
@@ -634,6 +640,7 @@ std::string DoImport(const py::dict& config_dict) {
     std::cout << abi::__cxa_demangle(type.c_str(), nullptr, nullptr, nullptr) << "; ";
   }
   std::cout << std::endl;
+  std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
 
   logger("CreateGraphInfo: start");
   auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
