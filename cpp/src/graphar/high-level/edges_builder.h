@@ -49,6 +49,36 @@ namespace graphar::builder {
  *
  */
 class Edge {
+ private:
+  IdType src_id_, dst_id_;
+  bool empty_;
+  mutable bool sorted_ = true;  // since we store everything in vector, we should sort it before using binary search
+  mutable std::vector<std::pair<std::string_view, std::any>> properties_;
+
+  /**
+   * @brief sortrs internal vector of properties
+   */
+  void sort_vector_() const
+  {
+    std::sort(properties_.begin(), properties_.end(), [](const auto &a, const auto& b){
+      return a.first < b.first;
+    });
+  }
+
+  const std::any* get_property_(const std::string& name) const
+  {
+    if (!sorted_)
+    {
+      sort_vector_();
+      sorted_ = true;
+    }
+    auto it = std::lower_bound(properties_.begin(), properties_.end(), name, 
+           [](const auto& a, const std::string& k){return a.first < k;});
+    if (it == properties_.end() || it->first != name)
+      return nullptr;
+    return &(it->second);
+  }
+
  public:
   /**
    * @brief Initialize the edge with its source and destination.
@@ -68,7 +98,7 @@ class Edge {
 
   /**
    * @brief Get source id of the edge.
-   *
+   *S
    * @return The id of the source vertex.
    */
   inline IdType GetSource() const noexcept { return src_id_; }
@@ -88,11 +118,9 @@ class Edge {
    */
   // TODO(@acezen): Enable the property to be a vector(list).
   inline void AddProperty(std::string_view name, const std::any& val) {
-    size_t cur_size = properties_.bucket_count(); // !!! Костыль
     empty_ = false;
-    properties_[name] = val;
-    if (properties_.bucket_count() > cur_size)  // !!! Костыль
-      std::cout << "rehashing!!!" << std::endl; // !!! Костыль
+    properties_.emplace_back(name, val);
+    sorted_ = false;
   }
 
   /**
@@ -112,15 +140,18 @@ class Edge {
    * @return The value of the property.
    */
   inline const std::any& GetProperty(const std::string& property) const {
-    return properties_.at(property);
+    const std::any* ptr = get_property_(property);
+    if (!ptr)
+      throw std::runtime_error("Key not found");
+    return *ptr;
   }
 
   /**
    * @brief Get all properties of the edge.
    *
-   * @return The map containing all properties of the edge.
+   * @return The vector containing all properties of the edge.
    */
-  inline const std::unordered_map<std::string_view, std::any>& GetProperties()
+  inline const std::vector<std::pair<std::string_view, std::any>>& GetProperties()
       const {
     return properties_;
   }
@@ -132,7 +163,7 @@ class Edge {
    * @return true/false.
    */
   inline bool ContainProperty(const std::string& property) const {
-    return (properties_.find(property) != properties_.end());
+    return get_property_(property) != nullptr;
   }
 
   /**
@@ -165,11 +196,6 @@ class Edge {
    * @brief Copy assigment.
    */
   Edge& operator=(const Edge& other) = default;
-
- private:
-  IdType src_id_, dst_id_;
-  bool empty_;
-  std::unordered_map<std::string_view, std::any> properties_;
 };
 
 /**
