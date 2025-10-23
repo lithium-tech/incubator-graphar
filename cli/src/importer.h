@@ -236,7 +236,6 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
 
 std::string DoImport(const py::dict& config_dict) {
   logger("Start of import");
-  MemUsage mem_usage = MemUsage();
   auto import_config = ConvertPyDictToConfig(config_dict);
 
   auto version =
@@ -412,7 +411,7 @@ std::string DoImport(const py::dict& config_dict) {
           props, graphar::StringToFileType(pg.file_type));
       pgs.push_back(property_group);
     }
-    logger("  edge <"+edge.edge_type+">Property groups: end ("+std::to_string(edge.property_groups.size())+" processed)");
+    logger("  edge <"+edge.edge_type+">Property groups: end ("+std::to_string(edge.property_groups.size()+1)+" processed)");
     graphar::AdjacentListVector adj_lists;
     for (const auto& adj_list : edge.adj_lists) {
       // TODO: add prefix parameter in config
@@ -430,7 +429,7 @@ std::string DoImport(const py::dict& config_dict) {
     auto edge_info = graphar::CreateEdgeInfo(
         edge.src_type, edge.edge_type, edge.dst_type, edge.chunk_size,
         vertex_chunk_sizes[edge.src_type], vertex_chunk_sizes[edge.dst_type],
-        directed, adj_lists, pgs, edge.prefix, version);
+        directed, adj_lists, pgs, edge.prefix, version);  //[MY TODO] pgs can be deleted now
     auto file_name =
         ConcatEdgeTriple(edge.src_type, edge.edge_type, edge.dst_type) +
         ".edge.yaml";
@@ -462,7 +461,7 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& source : edge.sources) {
         logger("edge <"+edge.edge_type+"> reading files: start");
 
-        std::vector<std::string> column_names;
+        std::vector<std::string> column_names; //[MY TODO] resrve
         for (const auto& [key, value] : source.columns) {
           column_names.emplace_back(key);
         }
@@ -535,7 +534,7 @@ std::string DoImport(const py::dict& config_dict) {
       }
       std::unordered_map<
           std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
-          vertex_columns_to_change;
+          vertex_columns_to_change;  //[MY TODO] useless???
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
       logger("Tables merged");
@@ -553,13 +552,15 @@ std::string DoImport(const py::dict& config_dict) {
       std::vector<std::string> edge_column_names;
       for (const auto& field : combined_edge_table->schema()->fields()) {
         edge_column_names.push_back(field->name());
+        //std::cout<< "Edge_column_name: " << field->name() << " ";
       }
+      //std::cout << std::endl;
 
       const int64_t num_rows = combined_edge_table->num_rows();
 
       if (first_adj) {
         first_adj = false;
-        for (int64_t i = 0; i < num_rows; ++i) {
+        for (int64_t i = 0; i < num_rows; ++i) {  //[MY TODO] can be done quicker?
           auto edge_src_column =
                   combined_edge_table->GetColumnByName(edge.src_edge_prop);
           auto edge_dst_column =
@@ -575,6 +576,13 @@ std::string DoImport(const py::dict& config_dict) {
         }
       }
       logger("Vectors ["+std::to_string(from_sizes.size())+"] and ["+std::to_string(to_sizes.size())+"] created.");
+      for(int i = 0; i < from_sizes.size(); i++)
+        std::cout << "[" << from_sizes[i] << "]";
+      std::cout << std::endl;
+      for(int i = 0; i < to_sizes.size(); i++)
+        std::cout << "[" << to_sizes[i] << "]";
+      std::cout << std::endl;
+      std::cout << "from_chunk_size: " << from_chunk_size << " to_chunk_size: " << to_chunk_size << std::endl;
 
       if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
           adj_list->GetType() == graphar::AdjListType::unordered_by_source) {
@@ -585,22 +593,22 @@ std::string DoImport(const py::dict& config_dict) {
       logger("Reserved space for edge_builder.");
 
       logger("Edge building: start");
+      auto edge_src_column =
+          combined_edge_table->GetColumnByName(edge.src_edge_prop);
+      auto edge_dst_column =
+          combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+      //std::cout << "Src: " << edge.src_edge_prop << " dst: " << edge.dst_edge_prop << std::endl;
       for (int64_t i = 0; i < num_rows; ++i) {
-        auto edge_src_column =
-            combined_edge_table->GetColumnByName(edge.src_edge_prop);
-        auto edge_dst_column =
-            combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-
         graphar::builder::Edge e(
             vertex_prop_index_map
-                .at(std::make_pair(edge.src_type, edge.src_prop))
+                .at(std::make_pair(edge.src_type, edge.src_prop))  //src vertex: type, prop
                 .at(edge_src_column->GetScalar(i).ValueOrDie()),
             vertex_prop_index_map
                 .at(std::make_pair(edge.dst_type, edge.dst_prop))
                 .at(edge_dst_column->GetScalar(i).ValueOrDie()));  
                 
         //[My] записать все в вектор пар, отсортировать единожды, потом создать ребро
-        e.Reserve(edge_column_names.size());  //overhead reserving 
+        e.Reserve(edge_column_names.size()-2);
         for (const auto& column_name : edge_column_names) {
           all_prop_names.insert(column_name); // DEBUG collecting all strings
 
@@ -620,7 +628,6 @@ std::string DoImport(const py::dict& config_dict) {
         }
         if (i % 10000000 == 0)
         {
-          std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
           logger("Added to edge_builder (before): "+std::to_string(i+1)+"/"+std::to_string(num_rows)); //[My]
         }
         if (i % 100000000 == 0)
@@ -628,6 +635,12 @@ std::string DoImport(const py::dict& config_dict) {
           std::cout << "------------------" << std::endl;
           malloc_stats();
           std::cout << "------------------" << std::endl;
+          for(const auto& type : all_types)
+          {
+            std::cout << abi::__cxa_demangle(type.c_str(), nullptr, nullptr, nullptr) << "; ";
+          }
+          std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
+          std::cout << "------------------<" << std::endl;
         }
         edge_builder->AddEdge(e);
       }
