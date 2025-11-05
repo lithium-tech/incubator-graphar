@@ -35,6 +35,7 @@
 #include <cxxabi.h>  // !!!
 #include <set> // !!!
 #include <string_view>
+#include <omp.h>
 
 #include <unistd.h>
 #include <fstream>
@@ -255,7 +256,7 @@ std::string DoImport(const py::dict& config_dict) {
   std::map<std::pair<std::string, std::string>, graphar::Property>
       vertex_prop_property_map;
   for (const auto& edge : import_config.import_schema.edges) {
-    vertex_props_in_edges[edge.src_type].emplace_back(edge.src_prop);
+    vertex_props_in_edges[edge.src_type].emplace_back(edge.src_prop);  //duplicates, but they weight not so much
     vertex_props_in_edges[edge.dst_type].emplace_back(edge.dst_prop);
   }
 
@@ -295,6 +296,7 @@ std::string DoImport(const py::dict& config_dict) {
     auto file_name = vertex.type + ".vertex.yaml";
     vertex_info->Save(save_path / file_name);
     vertices_info.push_back(vertex_info);
+    logger("Vertex info saved");
 
     auto save_path_str = save_path.string();
     save_path_str += "/";
@@ -440,9 +442,7 @@ std::string DoImport(const py::dict& config_dict) {
 
     logger("edge <"+edge.edge_type+">.yaml saved");
 
-    std::vector<int64_t> from_sizes((vertex_counts[edge.src_type] - 1) / vertex_chunk_sizes[edge.src_type] + 1);
     int64_t from_chunk_size = vertex_chunk_sizes[edge.src_type];
-    std::vector<int64_t> to_sizes((vertex_counts[edge.dst_type] - 1) / vertex_chunk_sizes[edge.dst_type] + 1);
     int64_t to_chunk_size = vertex_chunk_sizes[edge.dst_type];
     
     logger("edge <"+edge.edge_type+"> adjacent list: start");
@@ -540,8 +540,8 @@ std::string DoImport(const py::dict& config_dict) {
       logger("Tables merged");
       // TODO: check all fields in props
       auto combined_edge_table =
-          merged_edge_table->CombineChunks().ValueOrDie();
-
+          merged_edge_table->CombineChunks().ValueOrDie();  //[My] we moved edge_tables, so memory should not raise
+      logger("Combined_edge_table created");
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
               edge_info, save_path_str, adj_list->GetType(), vertex_count,
@@ -554,105 +554,123 @@ std::string DoImport(const py::dict& config_dict) {
         edge_column_names.push_back(field->name());
         //std::cout<< "Edge_column_name: " << field->name() << " ";
       }
+      logger("edge_column_names created");
       //std::cout << std::endl;
 
       const int64_t num_rows = combined_edge_table->num_rows();
 
-      if (first_adj) {
-        first_adj = false;
-        for (int64_t i = 0; i < num_rows; ++i) {  //[MY TODO] can be done quicker?
-          auto edge_src_column =
-                  combined_edge_table->GetColumnByName(edge.src_edge_prop);
+      //(multi-thread) mapping row to its' bucket
+      std::cout << "Multi-tread mapping: starts in " << omp_get_max_threads() << " treads" << std::endl;
+      
+      //calculating num of chunks
+      int num_of_chunks = 0;
+      if(adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
+        adj_list->GetType() == graphar::AdjListType::unordered_by_source)
+      {
+        num_of_chunks = (vertex_counts[edge.src_type] - 1) / vertex_chunk_sizes[edge.src_type] + 1;
+      }
+      else
+      {
+        num_of_chunks = (vertex_counts[edge.dst_type] - 1) / vertex_chunk_sizes[edge.dst_type] + 1;
+      }
+
+      //creating vector that maps row to its' chunk: [num_of_threads][num_of_chunks][rows]
+      std::vector<std::vector<std::vector<int64_t>>> edge_to_chunk_mapping(
+        omp_get_max_threads(),
+        std::vector<std::vector<int64_t>>(num_of_chunks)
+      );
+
+      //mapping each row to its' chunk
+      std::cout << "Num rows: " << num_rows << std::endl;
+      #pragma omp parallel for schedule(static)
+      for (int64_t row = 0; row < num_rows; ++row)
+      {
+        int64_t chunk = 0;
+        if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
+            adj_list->GetType() == graphar::AdjListType::unordered_by_source)
+        {
+          auto edge_src_column =  // getting column
+                combined_edge_table->GetColumnByName(edge.src_edge_prop);
+          chunk = vertex_prop_index_map  //calculate chunk according to chunk of the src vertex
+                            .at(std::make_pair(edge.src_type, edge.src_prop))
+                            .at(edge_src_column->GetScalar(row).ValueOrDie()) / edge_info->GetSrcChunkSize();
+        }
+        else
+        {
           auto edge_dst_column =
-                  combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-
-          from_sizes[vertex_prop_index_map
-                             .at(std::make_pair(edge.src_type, edge.src_prop))
-                             .at(edge_src_column->GetScalar(i).ValueOrDie())
-                     / from_chunk_size]++;
-          to_sizes[vertex_prop_index_map
-                           .at(std::make_pair(edge.dst_type, edge.dst_prop))
-                           .at(edge_dst_column->GetScalar(i).ValueOrDie()) / to_chunk_size]++;
+                combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+          chunk = vertex_prop_index_map
+                          .at(std::make_pair(edge.dst_type, edge.dst_prop))
+                          .at(edge_dst_column->GetScalar(row).ValueOrDie()) / edge_info->GetDstChunkSize();
         }
+        edge_to_chunk_mapping[omp_get_thread_num()][chunk].push_back(row);
       }
-      logger("Vectors ["+std::to_string(from_sizes.size())+"] and ["+std::to_string(to_sizes.size())+"] created.");
-      for(int i = 0; i < from_sizes.size(); i++)
-        std::cout << "[" << from_sizes[i] << "]";
-      std::cout << std::endl;
-      for(int i = 0; i < to_sizes.size(); i++)
-        std::cout << "[" << to_sizes[i] << "]";
-      std::cout << std::endl;
-      std::cout << "from_chunk_size: " << from_chunk_size << " to_chunk_size: " << to_chunk_size << std::endl;
 
-      if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
-          adj_list->GetType() == graphar::AdjListType::unordered_by_source) {
-        edge_builder->PreReserve(from_sizes);
-      } else {
-        edge_builder->PreReserve(to_sizes);
-      }
-      logger("Reserved space for edge_builder.");
-
-      logger("Edge building: start");
-      auto edge_src_column =
-          combined_edge_table->GetColumnByName(edge.src_edge_prop);
-      auto edge_dst_column =
-          combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-      //std::cout << "Src: " << edge.src_edge_prop << " dst: " << edge.dst_edge_prop << std::endl;
-      for (int64_t i = 0; i < num_rows; ++i) {
-        graphar::builder::Edge e(
-            vertex_prop_index_map
-                .at(std::make_pair(edge.src_type, edge.src_prop))  //src vertex: type, prop
-                .at(edge_src_column->GetScalar(i).ValueOrDie()),
-            vertex_prop_index_map
-                .at(std::make_pair(edge.dst_type, edge.dst_prop))
-                .at(edge_dst_column->GetScalar(i).ValueOrDie()));  
-                
-        //[My] записать все в вектор пар, отсортировать единожды, потом создать ребро
-        e.Reserve(edge_column_names.size()-2);
-        for (const auto& column_name : edge_column_names) {
-          all_prop_names.insert(column_name); // DEBUG collecting all strings
-
-          if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
-            auto column = combined_edge_table->GetColumnByName(column_name);
-            auto column_type = column->type();
-            std::any value;
-            TryToCastToAny(
-                graphar::DataType::ArrowDataTypeToDataType(column_type),
-                column->chunk(0), value, i);
-            if (value.has_value()) {
-              all_types.insert(value.type().name()); // DEBUG
-              edge_builder->AddColumnName(column_name);
-              e.AddProperty(edge_builder->GetColumnName(column_name), value);  
-            }
-          }
-        }
-        if (i % 10000000 == 0)
+      //logger
+      /*for(int chunk = 0; chunk < num_of_chunks; ++chunk)
+      {
+        for(int thread_output = 0; thread_output < omp_get_max_threads(); ++thread_output)
         {
-          logger("Added to edge_builder (before): "+std::to_string(i+1)+"/"+std::to_string(num_rows)); //[My]
-        }
-        if (i % 100000000 == 0)
-        {
-          std::cout << "------------------" << std::endl;
-          malloc_stats();
-          std::cout << "------------------" << std::endl;
-          for(const auto& type : all_types)
+          for(int i = 0; i < edge_to_chunk_mapping[thread_output][chunk].size(); ++i)
           {
-            std::cout << abi::__cxa_demangle(type.c_str(), nullptr, nullptr, nullptr) << "; ";
+            std::cout << "Chunk: " << chunk << " tread: " << thread_output << " row: " << edge_to_chunk_mapping[thread_output][chunk][i] << std::endl;
           }
-          std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
-          std::cout << "------------------<" << std::endl;
         }
-        edge_builder->AddEdge(e);
+      }*/
+
+      //starting edge building: adding edges chunk-wise
+      logger("Edge building: start");
+      for(int chunk = 0; chunk < num_of_chunks; ++chunk)
+      {
+        auto edge_src_column =
+          combined_edge_table->GetColumnByName(edge.src_edge_prop);
+        auto edge_dst_column =
+          combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+
+        //we should gather each thread's info about rows in this very chuck 
+        for(int thread_output = 0; thread_output < omp_get_max_threads(); ++thread_output)
+        {
+          //visit all the rows this thread found for this chunk
+          for(auto i : edge_to_chunk_mapping[thread_output][chunk])
+          {
+            //create an edge
+            graphar::builder::Edge e(
+              vertex_prop_index_map
+                  .at(std::make_pair(edge.src_type, edge.src_prop))  //src vertex: type, prop
+                  .at(edge_src_column->GetScalar(i).ValueOrDie()),   //src id
+              vertex_prop_index_map
+                  .at(std::make_pair(edge.dst_type, edge.dst_prop))
+                  .at(edge_dst_column->GetScalar(i).ValueOrDie()) //dst id
+            );
+
+            //reserve space for its' properties
+            e.Reserve(edge_column_names.size()-2);
+
+            //find properties and add them
+            for (const auto& column_name : edge_column_names) {
+              if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
+                auto column = combined_edge_table->GetColumnByName(column_name);
+                auto column_type = column->type();
+                std::any value;
+                TryToCastToAny(
+                    graphar::DataType::ArrowDataTypeToDataType(column_type),
+                    column->chunk(0), value, i);
+                if (value.has_value()) {
+                  edge_builder->AddColumnName(column_name);
+                  e.AddProperty(edge_builder->GetColumnName(column_name), value);  
+                }
+              }
+            }
+            edge_builder->AddEdge(e);
+          }
+          logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks)+"; thread_output: "+
+                 std::to_string(thread_output));
+        }
+        //the chunk is ready, dump it
+        edge_builder->Dump(chunk);
       }
-      edge_builder->Dump();
     }
   }
-
-  for(const auto& type : all_types)
-  {
-    std::cout << abi::__cxa_demangle(type.c_str(), nullptr, nullptr, nullptr) << "; ";
-  }
-  std::cout << std::endl;
   std::cout << "Unique column_names: " << all_prop_names.size() << std::endl;
 
   logger("CreateGraphInfo: start");

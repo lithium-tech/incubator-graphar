@@ -118,6 +118,22 @@ class Edge {
    */
   // TODO(@acezen): Enable the property to be a vector(list).
   inline void AddProperty(std::string_view name, const std::any& val) {
+    //debug
+    /*std::cout << "ADDING PROPERTY: " << src_id_ << "->" << dst_id_ << ": ";
+    const std::type_info& t = val.type();
+    if (t == typeid(long))
+    {
+      std::cout << std::any_cast<long>(val) <<std::endl;
+    }
+    else if (t == typeid(double))
+    {
+      std::cout << std::any_cast<double>(val) <<std::endl;
+    }
+    else if (t == typeid(std::string))
+    {
+      std::cout << "'" << std::any_cast<const std::string&>(val) << "'"<<std::endl;
+    }*/
+
     empty_ = false;
     properties_.emplace_back(name, val);
     sorted_ = false;
@@ -332,9 +348,8 @@ class EdgesBuilder {
     IdType vertex_chunk_index = getVertexChunkIndex(e);
     if (vertex_chunk_index >= edges_.size()) {
       edges_.resize(vertex_chunk_index + 1);
-      std::cout << "!!! resized edges_ in AddEdge()" << std::endl;
     }
-    edges_[vertex_chunk_index].push_back(e); //std::move  ??? 
+    edges_[vertex_chunk_index].emplace_back(e); //std::move  ??? 
     num_edges_++;
     return Status::OK();
   }
@@ -367,6 +382,7 @@ class EdgesBuilder {
    * @return Status: ok or error.
    */
   Status Dump();
+  Status Dump(int chunk);
 
   /**
    * @brief Construct an EdgesBuilder from edge info.

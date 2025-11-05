@@ -24,6 +24,8 @@
 #include "graphar/high-level/edges_builder.h"
 #include "graphar/result.h"
 
+#include <iostream>
+
 namespace graphar::builder {
 
 Status EdgesBuilder::Dump() {
@@ -56,7 +58,7 @@ Status EdgesBuilder::Dump() {
   // dump the vertex num
   GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
   // dump the edge nums
-  IdType vertex_chunk_num =
+  IdType vertex_chunk_num =  //[My] duplicate of num_vertex_chunks? ok...
       (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
   for (IdType vertex_chunk_index = 0; vertex_chunk_index < vertex_chunk_num;
        vertex_chunk_index++) {
@@ -66,13 +68,52 @@ Status EdgesBuilder::Dump() {
     // dump the edges
     for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
          vertex_chunk_index++) {
-    // convert to table
-    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
-    // write table
-    GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
-    edges_[vertex_chunk_index].clear();
-  }
+      // convert to table
+      GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
+      // write table
+      GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
+      edges_[vertex_chunk_index].clear();
+    }
   is_saved_ = true;
+  return Status::OK();
+}
+
+Status EdgesBuilder::Dump(int chunk) {
+  // construct the writer
+  EdgeChunkWriter writer(edge_info_, prefix_, adj_list_type_, validate_level_);
+
+  // dump the offsets
+  if (adj_list_type_ == AdjListType::ordered_by_source ||
+      adj_list_type_ == AdjListType::ordered_by_dest) {
+
+    // sort the edges
+    if (adj_list_type_ == AdjListType::ordered_by_source)
+      sort(edges_[chunk].begin(), edges_[chunk].end(), cmp_src);
+    if (adj_list_type_ == AdjListType::ordered_by_dest)
+      sort(edges_[chunk].begin(), edges_[chunk].end(), cmp_dst);
+
+    // construct and write offset chunk
+    GAR_ASSIGN_OR_RAISE(
+        auto offset_table,
+        getOffsetTable(chunk, edges_[chunk]));
+    GAR_RETURN_NOT_OK(
+        writer.WriteOffsetChunk(offset_table, chunk));
+  }
+
+  // dump the vertex num
+  GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
+  // dump the edge nums
+  std::cout << "Edges num: " << edges_[chunk].size() << "; chunk: " << chunk << std::endl;
+  GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
+      chunk, edges_[chunk].size()));
+
+  // dump the edges
+  // convert to table
+  GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[chunk])); //property issues
+  // write table
+  GAR_RETURN_NOT_OK(writer.WriteTable(input_table, chunk, 0)); 
+  edges_[chunk].clear();
+
   return Status::OK();
 }
 
@@ -318,6 +359,7 @@ Result<std::shared_ptr<arrow::Table>> EdgesBuilder::getOffsetTable(
   IdType begin_index = vertex_chunk_index * vertex_chunk_size_,
          end_index = begin_index + vertex_chunk_size_;
   RETURN_NOT_ARROW_OK(builder.Append(0));
+  std::cout << "Offset begin: " << begin_index << ", end: " << end_index << std::endl;
 
   std::vector<std::shared_ptr<arrow::Array>> arrays;
   std::vector<std::shared_ptr<arrow::Field>> schema_vector;
