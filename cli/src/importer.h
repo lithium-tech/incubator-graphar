@@ -608,7 +608,8 @@ std::string DoImport(const py::dict& config_dict) {
 
       //starting edge building: adding edges chunk-wise
       logger("Edge building: start");
-      #pragma omp parallel for schedule(static)
+      int processed_chunks = 0;
+      #pragma omp parallel for schedule(dynamic)
       for(int chunk = 0; chunk < num_of_chunks; ++chunk)
       {
         auto edge_src_column =
@@ -657,7 +658,11 @@ std::string DoImport(const py::dict& config_dict) {
         }
         //the chunk is ready, dump it
         edge_builder->Dump(chunk);
-        logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks));
+
+        #pragma omp atomic
+        ++processed_chunks;
+
+        logger("chunk: "+std::to_string(processed_chunks)+"/"+std::to_string(num_of_chunks));
       }
     }
   }

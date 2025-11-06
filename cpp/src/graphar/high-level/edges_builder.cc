@@ -103,7 +103,6 @@ Status EdgesBuilder::Dump(int chunk) {
   // dump the vertex num
   GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
   // dump the edge nums
-  std::cout << "Edges num: " << edges_[chunk].size() << "; chunk: " << chunk << std::endl;
   GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
       chunk, edges_[chunk].size()));
 
@@ -360,7 +359,6 @@ Result<std::shared_ptr<arrow::Table>> EdgesBuilder::getOffsetTable(
   IdType begin_index = vertex_chunk_index * vertex_chunk_size_,
          end_index = begin_index + vertex_chunk_size_;
   RETURN_NOT_ARROW_OK(builder.Append(0));
-  std::cout << "Offset begin: " << begin_index << ", end: " << end_index << std::endl;
 
   std::vector<std::shared_ptr<arrow::Array>> arrays;
   std::vector<std::shared_ptr<arrow::Field>> schema_vector;
