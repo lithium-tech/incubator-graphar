@@ -113,6 +113,7 @@ Status EdgesBuilder::Dump(int chunk) {
   // write table
   GAR_RETURN_NOT_OK(writer.WriteTable(input_table, chunk, 0)); 
   edges_[chunk].clear();
+  std::vector<Edge>().swap(edges_[chunk]);
 
   return Status::OK();
 }

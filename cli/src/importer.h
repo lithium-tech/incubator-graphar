@@ -606,20 +606,9 @@ std::string DoImport(const py::dict& config_dict) {
         edge_to_chunk_mapping[omp_get_thread_num()][chunk].push_back(row);
       }
 
-      //logger
-      /*for(int chunk = 0; chunk < num_of_chunks; ++chunk)
-      {
-        for(int thread_output = 0; thread_output < omp_get_max_threads(); ++thread_output)
-        {
-          for(int i = 0; i < edge_to_chunk_mapping[thread_output][chunk].size(); ++i)
-          {
-            std::cout << "Chunk: " << chunk << " tread: " << thread_output << " row: " << edge_to_chunk_mapping[thread_output][chunk][i] << std::endl;
-          }
-        }
-      }*/
-
       //starting edge building: adding edges chunk-wise
       logger("Edge building: start");
+      #pragma omp parallel for schedule(static)
       for(int chunk = 0; chunk < num_of_chunks; ++chunk)
       {
         auto edge_src_column =
@@ -663,11 +652,12 @@ std::string DoImport(const py::dict& config_dict) {
             }
             edge_builder->AddEdge(e);
           }
-          logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks)+"; thread_output: "+
-                 std::to_string(thread_output));
+          //logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks)+"; thread_output: "+
+          //       std::to_string(thread_output));
         }
         //the chunk is ready, dump it
         edge_builder->Dump(chunk);
+        logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks));
       }
     }
   }
