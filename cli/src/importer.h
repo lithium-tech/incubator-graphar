@@ -470,7 +470,19 @@ std::string DoImport(const py::dict& config_dict) {
           for (int i = 0; i < source.path.size(); ++i) {
             file_tables[i] = GetDataFromFile(source.path[i], column_names,
                                              source.delimiter, source.file_type);
-            std::cout << "Table: " << i << " size: " << file_tables[i]->num_rows() << std::endl;
+            std::cout << "Table: " << i << " size: " << file_tables[i]->num_rows();
+
+            for (int col_idx = 0; col_idx < file_tables[i]->num_columns(); ++col_idx) {
+              const auto& field = file_tables[i]->schema()->field(col_idx);
+              const auto& column = file_tables[i]->column(col_idx);
+              std::cout << " Column [" << col_idx << "] : " 
+                        << column->type()->ToString() << " ";
+            }
+            std::cout << std::endl;
+          }
+          //debug 
+          for (const auto& table : file_tables) {
+            std::cout << "Schema: " << table->schema()->ToString() << std::endl;
           }
           table = ConcatenateTables(file_tables).ValueOrDie();
           logger("edge <"+edge.edge_type+"> "+std::to_string(source.path.size()) +" tables concatenated");
@@ -526,7 +538,9 @@ std::string DoImport(const py::dict& config_dict) {
                 std::make_pair(prop.name, arrow_data_type);
           }
         }
+        logger("Name and data type are about to change.");
         table = ChangeNameAndDataType(table, columns_to_change);
+        std::cout << "Schema: " << table->schema()->ToString() << std::endl;  // debug
         logger("edge <"+edge.edge_type+"> table columns changed");
         edge_tables.push_back(table);
         logger("edge <"+edge.edge_type+"> table added");
@@ -536,10 +550,12 @@ std::string DoImport(const py::dict& config_dict) {
           vertex_columns_to_change;  
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
+      std::cout << "Schema: " << merged_edge_table->schema()->ToString() << std::endl;  // debug
       logger("Tables merged");
       // TODO: check all fields in props
       auto combined_edge_table =
           merged_edge_table->CombineChunks().ValueOrDie();  //[My] we moved edge_tables, so memory should not raise
+      std::cout << "Schema: " << combined_edge_table->schema()->ToString() << std::endl;  // debug
       logger("Combined_edge_table created");
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
@@ -559,7 +575,7 @@ std::string DoImport(const py::dict& config_dict) {
       const int64_t num_rows = combined_edge_table->num_rows();
 
       //(multi-thread) mapping row to its' bucket
-      int num_threads = 1;  // omp_get_max_threads() / 2
+      int num_threads =  omp_get_max_threads() / 2;
       std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
       
       //calculating num of chunks
@@ -593,8 +609,8 @@ std::string DoImport(const py::dict& config_dict) {
       //mapping each row to its' chunk
       std::cout << "Num rows: " << num_rows << std::endl;
       #pragma omp parallel for schedule(static) num_threads(num_threads)
-      //for (int64_t row = 0; row < num_rows; ++row)
-      for (int64_t row = 4746105072; row < 5042736639; ++row)
+      for (int64_t row = 0; row < num_rows; ++row)
+      //for (int64_t row = 4746105072; row < 5042736639; ++row)
       {
         int64_t chunk = 0;
         bool failed = false; //debug
@@ -700,13 +716,42 @@ std::string DoImport(const py::dict& config_dict) {
           for(auto i : edge_to_chunk_mapping[thread_output][chunk])
           {
             //create an edge
+            bool failed = false;
+
+            //debug: check src
+            auto src_key = std::make_pair(edge.src_type, edge.src_prop);
+            auto edge_src = edge_src_column->GetScalar(i).ValueOrDie();
+            auto& src_map = vertex_prop_index_map[src_key];
+            if (src_map.find(edge_src) == src_map.end())
+            {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << i 
+                        << "type: " << edge_src->type->ToString() 
+                        << "thead: " << omp_get_thread_num()
+                        << std::endl;
+              failed = true;
+            }
+
+            //debug: check dst
+            auto edge_dst = edge_dst_column->GetScalar(i).ValueOrDie();
+            auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
+            auto& dst_map = vertex_prop_index_map[dst_key];
+            if (dst_map.find(edge_dst) == dst_map.end())
+            {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << i 
+                        << "type: " << edge_dst->type->ToString() 
+                        << "thead: " << omp_get_thread_num()
+                        << std::endl;
+              failed = true;
+            }
+
+            if (failed)
+            {
+              continue;
+            }
+
             graphar::builder::Edge e(
-              vertex_prop_index_map
-                  .at(std::make_pair(edge.src_type, edge.src_prop))  //src vertex: type, prop
-                  .at(edge_src_column->GetScalar(i).ValueOrDie()),   //src id
-              vertex_prop_index_map
-                  .at(std::make_pair(edge.dst_type, edge.dst_prop))
-                  .at(edge_dst_column->GetScalar(i).ValueOrDie()) //dst id
+              src_map.at(edge_src),   //src id
+              dst_map.at(edge_dst) //dst id
             );
 
             //reserve space for its' properties
