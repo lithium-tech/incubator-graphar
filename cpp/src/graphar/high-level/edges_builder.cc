@@ -68,12 +68,12 @@ Status EdgesBuilder::Dump() {
     // dump the edges
     for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
          vertex_chunk_index++) {
-      // convert to table
-      GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
-      // write table
-      GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
-      edges_[vertex_chunk_index].clear();
-    }
+    // convert to table
+    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
+    // write table
+    GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
+    edges_[vertex_chunk_index].clear();
+  }
   is_saved_ = true;
   return Status::OK();
 }
