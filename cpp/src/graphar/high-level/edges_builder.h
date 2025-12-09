@@ -72,10 +72,18 @@ class Edge {
       sort_vector_();
       sorted_ = true;
     }
+    auto it = std::find_if(properties_.begin(), properties_.end(),
+                       [&name](const auto& p) { return p.first == name; });
+    if (it == properties_.end())
+      return nullptr;
+    /*for (const auto& p : properties_) {
+    std::cout << "Key: \"" << p.first << "\", name: \"" << name
+              << "\", less: " << (p.first < name) << ", equal: " << (p.first == name) << "\n";
+    }
     auto it = std::lower_bound(properties_.begin(), properties_.end(), name, 
            [](const auto& a, const std::string& k){return a.first < k;});
     if (it == properties_.end() || it->first != name)
-      return nullptr;
+      return nullptr;*/
     return &(it->second);
   }
 

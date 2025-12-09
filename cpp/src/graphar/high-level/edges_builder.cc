@@ -226,10 +226,13 @@ Status EdgesBuilder::tryToAppend(
   using CType = typename TypeToArrowType<type>::CType;
   arrow::MemoryPool* pool = arrow::default_memory_pool();
   typename TypeToArrowType<type>::BuilderType builder(pool);
+  std::cout << "Property name: " << property_name << std::endl;
   for (const auto& e : edges) {
+    std::cout << "Property found: " << e.Empty() << " || " << !e.ContainProperty(property_name) << std::endl;
     if (e.Empty() || (!e.ContainProperty(property_name))) {
       RETURN_NOT_ARROW_OK(builder.AppendNull());
     } else {
+      std::cout << "Property found!" << std::endl;
       RETURN_NOT_ARROW_OK(
           builder.Append(std::any_cast<CType>(e.GetProperty(property_name))));
     }
@@ -343,9 +346,12 @@ Result<std::shared_ptr<arrow::Table>> EdgesBuilder::convertToTable(
       schema_vector.push_back(arrow::field(
           property.name, DataType::DataTypeToArrowDataType(property.type)));
       // add a column to data
+      // data here is ok
       std::shared_ptr<arrow::Array> array;
       GAR_RETURN_NOT_OK(
           appendToArray(property.type, property.name, array, edges));
+      int64_t null_count = array->null_count();
+      std::cout << "Number of nulls in property '" << property.name << "': " << null_count << std::endl;
       arrays.push_back(array);
     }
   }

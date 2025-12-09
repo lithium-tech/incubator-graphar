@@ -575,7 +575,7 @@ std::string DoImport(const py::dict& config_dict) {
       const int64_t num_rows = combined_edge_table->num_rows();
 
       //(multi-thread) mapping row to its' bucket
-      int num_threads =  omp_get_max_threads() / 2;
+      int num_threads =  1; //omp_get_max_threads() / 2;
       std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
       
       //calculating num of chunks
