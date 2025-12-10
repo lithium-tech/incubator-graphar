@@ -67,23 +67,10 @@ class Edge {
 
   const std::any* get_property_(const std::string& name) const
   {
-    if (!sorted_)
-    {
-      sort_vector_();
-      sorted_ = true;
-    }
     auto it = std::find_if(properties_.begin(), properties_.end(),
                        [&name](const auto& p) { return p.first == name; });
     if (it == properties_.end())
       return nullptr;
-    /*for (const auto& p : properties_) {
-    std::cout << "Key: \"" << p.first << "\", name: \"" << name
-              << "\", less: " << (p.first < name) << ", equal: " << (p.first == name) << "\n";
-    }
-    auto it = std::lower_bound(properties_.begin(), properties_.end(), name, 
-           [](const auto& a, const std::string& k){return a.first < k;});
-    if (it == properties_.end() || it->first != name)
-      return nullptr;*/
     return &(it->second);
   }
 
@@ -126,22 +113,6 @@ class Edge {
    */
   // TODO(@acezen): Enable the property to be a vector(list).
   inline void AddProperty(std::string_view name, const std::any& val) {
-    //debug
-    /*std::cout << "ADDING PROPERTY: " << src_id_ << "->" << dst_id_ << ": ";
-    const std::type_info& t = val.type();
-    if (t == typeid(long))
-    {
-      std::cout << std::any_cast<long>(val) <<std::endl;
-    }
-    else if (t == typeid(double))
-    {
-      std::cout << std::any_cast<double>(val) <<std::endl;
-    }
-    else if (t == typeid(std::string))
-    {
-      std::cout << "'" << std::any_cast<const std::string&>(val) << "'"<<std::endl;
-    }*/
-
     empty_ = false;
     properties_.emplace_back(name, val);
     sorted_ = false;

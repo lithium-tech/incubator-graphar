@@ -470,19 +470,6 @@ std::string DoImport(const py::dict& config_dict) {
           for (int i = 0; i < source.path.size(); ++i) {
             file_tables[i] = GetDataFromFile(source.path[i], column_names,
                                              source.delimiter, source.file_type);
-            std::cout << "Table: " << i << " size: " << file_tables[i]->num_rows();
-
-            for (int col_idx = 0; col_idx < file_tables[i]->num_columns(); ++col_idx) {
-              const auto& field = file_tables[i]->schema()->field(col_idx);
-              const auto& column = file_tables[i]->column(col_idx);
-              std::cout << " Column [" << col_idx << "] : " 
-                        << column->type()->ToString() << " ";
-            }
-            std::cout << std::endl;
-          }
-          //debug 
-          for (const auto& table : file_tables) {
-            std::cout << "Schema: " << table->schema()->ToString() << std::endl;
           }
           table = ConcatenateTables(file_tables).ValueOrDie();
           logger("edge <"+edge.edge_type+"> "+std::to_string(source.path.size()) +" tables concatenated");
@@ -540,7 +527,6 @@ std::string DoImport(const py::dict& config_dict) {
         }
         logger("Name and data type are about to change.");
         table = ChangeNameAndDataType(table, columns_to_change);
-        std::cout << "Schema: " << table->schema()->ToString() << std::endl;  // debug
         logger("edge <"+edge.edge_type+"> table columns changed");
         edge_tables.push_back(table);
         logger("edge <"+edge.edge_type+"> table added");
@@ -550,12 +536,10 @@ std::string DoImport(const py::dict& config_dict) {
           vertex_columns_to_change;  
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
-      std::cout << "Schema: " << merged_edge_table->schema()->ToString() << std::endl;  // debug
       logger("Tables merged");
       // TODO: check all fields in props
       auto combined_edge_table =
           merged_edge_table->CombineChunks().ValueOrDie();  //[My] we moved edge_tables, so memory should not raise
-      std::cout << "Schema: " << combined_edge_table->schema()->ToString() << std::endl;  // debug
       logger("Combined_edge_table created");
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
@@ -567,15 +551,13 @@ std::string DoImport(const py::dict& config_dict) {
       std::vector<std::string> edge_column_names;
       for (const auto& field : combined_edge_table->schema()->fields()) {
         edge_column_names.push_back(field->name());
-        //std::cout<< "Edge_column_name: " << field->name() << " ";
       }
       logger("edge_column_names created");
-      //std::cout << std::endl;
 
       const int64_t num_rows = combined_edge_table->num_rows();
 
       //(multi-thread) mapping row to its' bucket
-      int num_threads =  1; //omp_get_max_threads() / 2;
+      int num_threads =  omp_get_max_threads() / 2;
       std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
       
       //calculating num of chunks
@@ -599,18 +581,11 @@ std::string DoImport(const py::dict& config_dict) {
       //debug info
       auto edge_src = combined_edge_table->GetColumnByName(edge.src_edge_prop)->GetScalar(0).ValueOrDie();
       auto edge_dst = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->GetScalar(0).ValueOrDie();
-      std::cout << "Type (src): " << edge_src->type->ToString()
-                //<< " | Value: " << edge_src->ToString()
-                << std::endl
-                << "Type (dst): " << edge_dst->type->ToString()
-                //<< " | Value: " << edge_dst->ToString()
-                << std::endl;
 
       //mapping each row to its' chunk
       std::cout << "Num rows: " << num_rows << std::endl;
       #pragma omp parallel for schedule(static) num_threads(num_threads)
       for (int64_t row = 0; row < num_rows; ++row)
-      //for (int64_t row = 4746105072; row < 5042736639; ++row)
       {
         int64_t chunk = 0;
         bool failed = false; //debug
@@ -620,57 +595,50 @@ std::string DoImport(const py::dict& config_dict) {
           auto edge_src_column =  // getting column
                 combined_edge_table->GetColumnByName(edge.src_edge_prop);
 
-          //gebug start
           auto edge_src = edge_src_column->GetScalar(row).ValueOrDie();
           auto src_key = std::make_pair(edge.src_type, edge.src_prop);
+          auto& src_map = vertex_prop_index_map.at(src_key);
+          auto val = src_map.find(edge_src);
 
-          if (vertex_prop_index_map.find(src_key) == vertex_prop_index_map.end())
+          if (val == src_map.end())
           {
-            std::cout << "!!! Could not find <" << edge.src_type << ", " << edge.src_prop << "> in vertex_prop_index_map, row:" << row << std::endl;
+            #pragma omp critical
+            {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << row 
+                        << "type: " << edge_src->type->ToString() 
+                        << "thead: " << omp_get_thread_num()
+                        << std::endl;
+            }
             failed = true;
           }
-          auto& src_map = vertex_prop_index_map[src_key];
-          if (src_map.find(edge_src) == src_map.end())
-          {
-            std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << row 
-                      << "type: " << edge_src->type->ToString() 
-                      << "thead: " << omp_get_thread_num()
-                      << std::endl;
-            failed = true;
-          }
-          //debug end
           if(!failed)
           {
-          chunk = src_map.at(edge_src) / edge_info->GetSrcChunkSize();
+            chunk = val->second / edge_info->GetSrcChunkSize();
           }
         }
         else
         {
           auto edge_dst_column =
                 combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-          
-          //gebug start
-          auto edge_src = edge_dst_column->GetScalar(row).ValueOrDie();
-          auto src_key = std::make_pair(edge.dst_type, edge.dst_prop);
+          auto edge_dst = edge_dst_column->GetScalar(row).ValueOrDie();
+          auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
+          auto& dst_map = vertex_prop_index_map.at(dst_key);
+          auto val = dst_map.find(edge_dst);
 
-          if (vertex_prop_index_map.find(src_key) == vertex_prop_index_map.end())
+          if (val == dst_map.end())
           {
-            std::cout << "!!! Could not find <" << edge.dst_type << ", " << edge.dst_prop << "> in vertex_prop_index_map, row:" << row << std::endl;
+            #pragma omp critical
+            {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << row 
+                        << "type: " << edge_dst->type->ToString() 
+                        << "thead: " << omp_get_thread_num()
+                        << std::endl;
+            }
             failed = true;
           }
-          auto& src_map = vertex_prop_index_map[src_key];
-          if (src_map.find(edge_src) == src_map.end())
-          {
-            std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << row 
-                      << "type: " << edge_dst->type->ToString() 
-                      << "thead: " << omp_get_thread_num()
-                      << std::endl;
-            failed = true;
-          }
-          //debug end
           if (!failed)
           {
-          chunk = src_map.at(edge_src) / edge_info->GetDstChunkSize();
+            chunk = val->second / edge_info->GetDstChunkSize();
           }
         }
         if(failed)
@@ -691,10 +659,17 @@ std::string DoImport(const py::dict& config_dict) {
         else
         {
           edge_to_chunk_mapping[omp_get_thread_num()][chunk].push_back(row);
-          if(row % 1000000000 == 0)
+          /*if(row % 1000000000 == 0)
           {
             malloc_stats();
-          }
+          }*/
+        }
+      }
+      
+      // add column names
+      for (const auto& column_name : edge_column_names) {
+        if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
+          edge_builder->AddColumnName(column_name);
         }
       }
 
@@ -722,7 +697,8 @@ std::string DoImport(const py::dict& config_dict) {
             auto src_key = std::make_pair(edge.src_type, edge.src_prop);
             auto edge_src = edge_src_column->GetScalar(i).ValueOrDie();
             auto& src_map = vertex_prop_index_map[src_key];
-            if (src_map.find(edge_src) == src_map.end())
+            auto val_src = src_map.find(edge_src);
+            if (val_src == src_map.end())
             {
               std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << i 
                         << "type: " << edge_src->type->ToString() 
@@ -735,7 +711,8 @@ std::string DoImport(const py::dict& config_dict) {
             auto edge_dst = edge_dst_column->GetScalar(i).ValueOrDie();
             auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
             auto& dst_map = vertex_prop_index_map[dst_key];
-            if (dst_map.find(edge_dst) == dst_map.end())
+            auto val_dst = dst_map.find(edge_dst);
+            if (val_dst == dst_map.end())
             {
               std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << i 
                         << "type: " << edge_dst->type->ToString() 
@@ -750,8 +727,8 @@ std::string DoImport(const py::dict& config_dict) {
             }
 
             graphar::builder::Edge e(
-              src_map.at(edge_src),   //src id
-              dst_map.at(edge_dst) //dst id
+              val_src->second,   //src id
+              val_dst->second    //dst id
             );
 
             //reserve space for its' properties
@@ -767,15 +744,12 @@ std::string DoImport(const py::dict& config_dict) {
                     graphar::DataType::ArrowDataTypeToDataType(column_type),
                     column->chunk(0), value, i);
                 if (value.has_value()) {
-                  edge_builder->AddColumnName(column_name);
                   e.AddProperty(edge_builder->GetColumnName(column_name), value);  
                 }
               }
             }
             edge_builder->AddEdge(e);
           }
-          //logger("chunk: "+std::to_string(chunk+1)+"/"+std::to_string(num_of_chunks)+"; thread_output: "+
-          //       std::to_string(thread_output));
         }
         //the chunk is ready, dump it
         edge_builder->Dump(chunk);
