@@ -108,6 +108,11 @@ std::shared_ptr<arrow::Table> GetDataFromParquetFile(
                              status.ToString());
   }
 
+  // Print all column names from the schema
+  for (int i = 0; i < schema->num_fields(); ++i) {
+      std::cout << "Column " << i << ": " << schema->field(i)->name() << std::endl;
+  }
+
   // Map column names to their indices in the schema
   std::vector<int> column_indices;
   column_indices.reserve(column_names.size());

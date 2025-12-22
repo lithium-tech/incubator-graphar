@@ -268,8 +268,10 @@ std::string DoImport(const py::dict& config_dict) {
 
     auto pgs = std::vector<std::shared_ptr<graphar::PropertyGroup>>();
     std::string primary_key;
+    int number_of_pgroups = 0;
     for (const auto& pg : vertex.property_groups) {
       std::vector<graphar::Property> props;
+      ++number_of_pgroups;
       for (const auto& prop : pg.properties) {
         if (prop.is_primary) {
           if (!primary_key.empty()) {
@@ -285,9 +287,10 @@ std::string DoImport(const py::dict& config_dict) {
         vertex_prop_property_map[std::make_pair(vertex.type, prop.name)] =
             property;
       }
-      // TODO: add prefix parameter in config
+      // TODO: add prefix parameter in config !!!
       auto property_group = graphar::CreatePropertyGroup(
-          props, graphar::StringToFileType(pg.file_type));
+          props, graphar::StringToFileType(pg.file_type), 
+          vertex.type+"_properties_"+std::to_string(number_of_pgroups));
       pgs.emplace_back(property_group);
     }
     auto vertex_info =
@@ -311,6 +314,7 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& [key, value] : source.columns) {
         column_names.emplace_back(key);
       }
+      logger("  Source columns collected: "+std::to_string(column_names.size()));
 
       std::shared_ptr<arrow::Table> table;
       {
@@ -321,6 +325,7 @@ std::string DoImport(const py::dict& config_dict) {
         }
         table = ConcatenateTables(file_tables).ValueOrDie();
       }
+      logger("Vertex sources read.");
 
       std::unordered_map<std::string, Property> column_prop_map;
       std::unordered_map<std::string, std::string> reversed_columns_config;
@@ -332,6 +337,7 @@ std::string DoImport(const py::dict& config_dict) {
           column_prop_map[reversed_columns_config[prop.name]] = prop;
         }
       }
+      std::cout << "Size of column_prop_map: " << column_prop_map.size() << std::endl;
       std::unordered_map<
           std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
           columns_to_change;
@@ -369,11 +375,13 @@ std::string DoImport(const py::dict& config_dict) {
             ->AddIndexColumn(merged_vertex_table, start_chunk_index,
                              vertex_info->GetChunkSize())
             .value();
+    logger("Vertex table with index created");
 
     for (const auto& property_group : pgs) {
       vertex_prop_writer->WriteTable(vertex_table_with_index, property_group,
                                      start_chunk_index);
     }
+    logger("Wrote "+std::to_string(pgs.size())+" property tables.");
     auto vertex_count = merged_vertex_table->num_rows();
     vertex_counts[vertex.type] = vertex_count;
     vertex_prop_writer->WriteVerticesNum(vertex_count);
@@ -578,7 +586,6 @@ std::string DoImport(const py::dict& config_dict) {
         std::vector<std::vector<int64_t>>(num_of_chunks)
       );
 
-      //debug info
       auto edge_src = combined_edge_table->GetColumnByName(edge.src_edge_prop)->GetScalar(0).ValueOrDie();
       auto edge_dst = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->GetScalar(0).ValueOrDie();
 

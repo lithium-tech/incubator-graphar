@@ -750,7 +750,7 @@ Status EdgeChunkWriter::WriteAdjListChunk(
   return fs_->WriteTableToFile(in_table, file_type, path);
 }
 
-Status EdgeChunkWriter::WritePropertyChunk(
+Status EdgeChunkWriter::WritePropertyChunk(  //[My] this is what I should investigate
     const std::shared_ptr<arrow::Table>& input_table,
     const std::shared_ptr<PropertyGroup>& property_group,
     IdType vertex_chunk_index, IdType chunk_index,
