@@ -27,6 +27,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     check_graph,
     check_vertex,
     do_import,
+    do_merge,
     get_edge_count,
     get_edge_types,
     get_vertex_count,
@@ -166,6 +167,37 @@ def import_data(
         logger.info(res)
     except Exception as e:
         logger.error("Import failed: %s", e)
+        raise typer.Exit(1) from None
+
+
+@app.command(
+    "merge",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Merge data to existing GraphAr graph",
+    no_args_is_help=True,
+)
+def import_data(
+    config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr merge config file"),
+    debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+):
+    if not Path(config_file).is_file():
+        logger.error("File not found: %s", config_file)
+        raise typer.Exit(1)
+
+    try:
+        with Path(config_file).open(encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        import_config = ImportConfig(**config, debug_mode=debug_mode)  # TODO: remove warning
+        #validate(import_config)  TODO: make my config
+    except Exception as e:
+        logger.error("Invalid config: %s", e)
+        raise typer.Exit(1) from None
+    try:
+        logger.info("Starting merge")
+        res = do_merge(import_config.model_dump()) # TODO: make my C++ code
+        logger.info(res)
+    except Exception as e:
+        logger.error("Merge failed: %s", e)
         raise typer.Exit(1) from None
 
 

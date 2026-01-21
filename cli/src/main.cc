@@ -24,6 +24,7 @@
 #include "graphar/graph_info.h"
 #include "graphar/reader_util.h"
 #include "importer.h"
+#include "merger.h"
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -165,6 +166,7 @@ PYBIND11_MODULE(_core, m) {
   m.def("get_vertex_count", &GetVertexCount, "Get the vertex count");
   m.def("get_edge_count", &GetEdgeCount, "Get the edge count");
   m.def("do_import", &DoImport, "Do the import");
+  m.def("do_merge", &DoMerge, "Do the merge");
 #ifdef VERSION_INFO
   m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
 #else
