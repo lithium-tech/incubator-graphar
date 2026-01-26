@@ -23,6 +23,19 @@ from typing import Dict, List, Literal, Optional  # TODO: move to the TYPE_CHECK
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing_extensions import Self
 
+from ._core import (  # type: ignore  # noqa: PGH003
+    check_edge,
+    check_graph,
+    check_vertex,
+    get_edge_count,
+    get_edge_types,
+    get_vertex_count,
+    get_vertex_types,
+    show_edge,
+    show_graph,
+    show_vertex,
+)
+
 logger = getLogger("graphar_cli")
 
 # TODO: move them to constants.py
@@ -41,7 +54,7 @@ class FileType(str, Enum):
     json = "json"
 
 
-class GraphArConfig(BaseModel):
+class GrapArBaseConfig(BaseModel):
     path: str
     name: str
     vertex_chunk_size: Optional[int] = 100
@@ -53,6 +66,8 @@ class GraphArConfig(BaseModel):
     validate_level: Literal["no", "weak", "strong"] = DEFAULT_VALIDATE_LEVEL
     version: Optional[str] = DEFAULT_VERSION
 
+
+class GraphArConfig(GrapArBaseConfig):
     @field_validator("path")
     def check_path(cls, v):
         path = Path(v).resolve().absolute()
@@ -62,6 +77,18 @@ class GraphArConfig(BaseModel):
             msg = f"Warning: Path {v} already exists and contains files."
             logger.warning(msg)
         return v
+
+
+class GraphArMergeConfig(GrapArBaseConfig):
+    @model_validator(mode='after')
+    def check_path(self):
+        path = Path(self.path).resolve().absolute()
+        if not path.exists():
+            raise ValueError(f"Path '{path}' does not exist.")
+        # check this is valid graphar in folder accroding to main .yaml
+        if not check_graph(f"{self.path}/{self.name}.yaml"):
+            raise ValueError("Graph is not valid.")
+        return self
 
 
 class Property(BaseModel):
@@ -173,6 +200,12 @@ class Vertex(BaseModel):
             self.prefix = f"vertex/{type}/"
         return self
 
+class MergeVertex(Vertex):
+    join_on: str
+    @field_validator("join_on")
+    def check_join_field_exists(cls, v):
+        # TODO: check this property is in graph
+        return v
 
 class AdjList(BaseModel):
     ordered: bool
@@ -225,6 +258,23 @@ class Edge(BaseModel):
         return self
 
 
+class MergeEdge(Edge):
+    @field_validator("src_prop")
+    def check_src_prop_exists(cls, v):
+        # TODO: check src_prop exists in graph
+        return v
+
+    @field_validator("dst_prop")
+    def check_dst_prop_exists(cls, v):
+        # TODO: check dst_prop exists in graph
+        return v
+
+
+class MergeSchema(BaseModel):
+    vertices: List[MergeVertex]
+    edges: List[MergeEdge]
+
+        
 class ImportSchema(BaseModel):
     vertices: List[Vertex]
     edges: List[Edge]
@@ -235,6 +285,43 @@ class ImportSchema(BaseModel):
             msg = "vertices must not be empty."
             raise ValueError(msg)
         return v
+
+
+class MergeConfig(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    graphar: GraphArMergeConfig
+    merge_schema: MergeSchema
+    debug_mode: bool
+
+    @model_validator(mode="after")
+    def check_merge_none_types(self) -> Self:
+        for vertex in self.merge_schema.vertices:
+            if vertex.chunk_size is None:
+                pass
+                # TODO: get graphar chunk size
+            if vertex.validate_level is None:
+                # TODO: get graphar validate level
+                pass
+            for property_group in vertex.property_groups:
+                if property_group.file_type is None:
+                    # TODO: get graphar property file type
+                    pass
+        for edge in self.merge_schema.edges:
+            if edge.chunk_size is None:
+                pass
+                # TODO: get graphar chunk size
+            if edge.validate_level is None:
+                # TODO: get graphar validate level
+                pass
+            for adj_list in edge.adj_lists:
+                if adj_list.file_type is None:
+                    # TODO: get converted file type
+                    pass
+            for property_group in edge.property_groups:
+                if property_group.file_type is None:
+                    # TODO: get prop groups file type
+                    pass
 
 
 class ImportConfig(BaseModel):

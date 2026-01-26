@@ -36,7 +36,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     show_graph,
     show_vertex,
 )
-from .config import ImportConfig
+from .config import ImportConfig, MergeConfig
 from .importer import validate
 from .logging import setup_logging
 
@@ -176,7 +176,7 @@ def import_data(
     help="Merge data to existing GraphAr graph",
     no_args_is_help=True,
 )
-def import_data(
+def merge_data(
     config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr merge config file"),
     debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
 ):
@@ -187,14 +187,14 @@ def import_data(
     try:
         with Path(config_file).open(encoding="utf-8") as file:
             config = yaml.safe_load(file)
-        import_config = ImportConfig(**config, debug_mode=debug_mode)  # TODO: remove warning
-        #validate(import_config)  TODO: make my config
+        merge_config = MergeConfig(**config, debug_mode=debug_mode)  # TODO: remove warning
+        #validate(merge_config) TODO: make my validation
     except Exception as e:
         logger.error("Invalid config: %s", e)
         raise typer.Exit(1) from None
     try:
         logger.info("Starting merge")
-        res = do_merge(import_config.model_dump()) # TODO: make my C++ code
+        res = do_merge(merge_config.model_dump()) # TODO: make my C++ code
         logger.info(res)
     except Exception as e:
         logger.error("Merge failed: %s", e)
