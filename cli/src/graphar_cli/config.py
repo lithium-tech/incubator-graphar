@@ -202,10 +202,6 @@ class Vertex(BaseModel):
 
 class MergeVertex(Vertex):
     join_on: str
-    @field_validator("join_on")
-    def check_join_field_exists(cls, v):
-        # TODO: check this property is in graph
-        return v
 
 class AdjList(BaseModel):
     ordered: bool
@@ -259,15 +255,8 @@ class Edge(BaseModel):
 
 
 class MergeEdge(Edge):
-    @field_validator("src_prop")
-    def check_src_prop_exists(cls, v):
-        # TODO: check src_prop exists in graph
-        return v
-
-    @field_validator("dst_prop")
-    def check_dst_prop_exists(cls, v):
-        # TODO: check dst_prop exists in graph
-        return v
+    # left for future modifications
+    pass
 
 
 class MergeSchema(BaseModel):
@@ -295,33 +284,25 @@ class MergeConfig(BaseModel):
     debug_mode: bool
 
     @model_validator(mode="after")
-    def check_merge_none_types(self) -> Self:
+    def check_merge(self) -> Self:
         for vertex in self.merge_schema.vertices:
-            if vertex.chunk_size is None:
-                pass
-                # TODO: get graphar chunk size
-            if vertex.validate_level is None:
-                # TODO: get graphar validate level
-                pass
-            for property_group in vertex.property_groups:
-                if property_group.file_type is None:
-                    # TODO: get graphar property file type
-                    pass
+
+            # check if 'join_on' field exists
+            path_to_graph = f"{self.graphar.path}/{self.graphar.name}.yaml"
+            vertex_description =  show_vertex(path_to_graph, vertex.type)
+            if vertex.join_on not in vertex_description:
+                msg=f"Join_on field ({vertex.join_on}) not found in schema."
+                raise ValueError(msg)
+        
+        possible_vertex_types = get_vertex_types(f"{self.graphar.path}/{self.graphar.name}.yaml")
         for edge in self.merge_schema.edges:
-            if edge.chunk_size is None:
-                pass
-                # TODO: get graphar chunk size
-            if edge.validate_level is None:
-                # TODO: get graphar validate level
-                pass
-            for adj_list in edge.adj_lists:
-                if adj_list.file_type is None:
-                    # TODO: get converted file type
-                    pass
-            for property_group in edge.property_groups:
-                if property_group.file_type is None:
-                    # TODO: get prop groups file type
-                    pass
+            # check src_type & dst_type vertices exist
+            if edge.src_type not in possible_vertex_types:
+                msg = f"Edge src: {edge.src_type} does not exist."
+                raise ValueError(msg)
+            if edge.dst_type not in possible_vertex_types:
+                msg = f"Edge dst: {edge.dst_type} does not exist."
+                raise ValueError(msg)
 
 
 class ImportConfig(BaseModel):

@@ -201,7 +201,7 @@ Status VertexPropertyArrowChunkReader::seek(IdType id) {
 }
 
 Result<std::shared_ptr<arrow::Table>>
-VertexPropertyArrowChunkReader::GetChunk() {
+VertexPropertyArrowChunkReader::GetChunk() {  //[My research]
   GAR_RETURN_NOT_OK(util::CheckFilterOptions(filter_options_, property_group_));
   if (chunk_table_ == nullptr) {
     GAR_ASSIGN_OR_RAISE(

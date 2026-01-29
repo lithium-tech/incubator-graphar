@@ -106,7 +106,7 @@ std::shared_ptr<ds::FileFormat> FileSystem::GetFileFormat(
   }
 }
 
-Result<std::shared_ptr<arrow::Table>> FileSystem::ReadFileToTable(
+Result<std::shared_ptr<arrow::Table>> FileSystem::ReadFileToTable(  //[My research]
     const std::string& path, FileType file_type,
     const util::FilterOptions& options) const noexcept {
   std::shared_ptr<ds::FileFormat> format = GetFileFormat(file_type);
