@@ -19,14 +19,34 @@ void logger(std::string message)
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
+void GraphArConfig::fill(const py::dict& config_dict) {
+  path = config_dict["path"].cast<std::string>();
+  name = config_dict["name"].cast<std::string>();
+  version = config_dict["version"].cast<std::string>();
+}
+
+void Property::fill(const py::dict& config_dict) {
+  name = config_dict["name"].cast<std::string>();
+  data_type = config_dict["data_type"].cast<std::string>();
+  is_primary = config_dict["is_primary"].cast<bool>();
+  nullable = config_dict["nullable"].cast<bool>();
+}
+
+void PropertyGroup::fill(const py::dict& config_dict) {
+  file_type = config_dict["file_type"].cast<std::string>();
+  auto prop_list = config_dict["properties"].cast<std::vector<py::dict>>();
+  for (const auto& prop_dict : prop_list) {
+    Property prop;
+    prop.fill(prop_dict);
+    properties.emplace_back(prop);
+  }
+}
+
 ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
   ImportConfig import_config;
 
   auto graphar_dict = config_dict["graphar"].cast<py::dict>();
-  import_config.graphar_config.path = graphar_dict["path"].cast<std::string>();
-  import_config.graphar_config.name = graphar_dict["name"].cast<std::string>();
-  import_config.graphar_config.version =
-      graphar_dict["version"].cast<std::string>();
+  import_config.graphar_config.fill(graphar_dict);
 
   auto schema_dict = config_dict["import_schema"].cast<py::dict>();
 
@@ -42,17 +62,7 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
     auto pg_list = vertex_dict["property_groups"].cast<std::vector<py::dict>>();
     for (const auto& pg_dict : pg_list) {
       PropertyGroup pg;
-      pg.file_type = pg_dict["file_type"].cast<std::string>();
-
-      auto prop_list = pg_dict["properties"].cast<std::vector<py::dict>>();
-      for (const auto& prop_dict : prop_list) {
-        Property prop;
-        prop.name = prop_dict["name"].cast<std::string>();
-        prop.data_type = prop_dict["data_type"].cast<std::string>();
-        prop.is_primary = prop_dict["is_primary"].cast<bool>();
-        prop.nullable = prop_dict["nullable"].cast<bool>();
-        pg.properties.emplace_back(prop);
-      }
+      pg.fill(pg_dict);
       vertex.property_groups.emplace_back(pg);
     }
 

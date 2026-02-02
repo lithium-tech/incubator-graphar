@@ -9,10 +9,14 @@
 #include <vector>
 #include <unordered_map>
 
+namespace py = pybind11;
+
 struct GraphArConfig {
   std::string path;
   std::string name;
   std::string version;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct Property {
@@ -20,11 +24,15 @@ struct Property {
   std::string data_type;
   bool is_primary;
   bool nullable;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct PropertyGroup {
   std::string file_type;
   std::vector<Property> properties;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct Source {
