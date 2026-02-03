@@ -42,6 +42,61 @@ void PropertyGroup::fill(const py::dict& config_dict) {
   }
 }
 
+void Source::fill(const py::dict& config_dict) {
+  file_type = config_dict["file_type"].cast<std::string>();
+  path = config_dict["path"].cast<std::vector<std::string>>();
+  delimiter = config_dict["delimiter"].cast<char>();
+  columns = config_dict["columns"].cast<std::unordered_map<std::string, std::string>>();
+}
+
+void Vertex::fill(const py::dict& config_dict) {
+  type = config_dict["type"].cast<std::string>();
+  chunk_size = config_dict["chunk_size"].cast<int>();
+  prefix = config_dict["prefix"].cast<std::string>();
+  validate_level = config_dict["validate_level"].cast<std::string>();
+  labels = config_dict["labels"].cast<std::vector<std::string>>();
+
+  auto pg_list = config_dict["property_groups"].cast<std::vector<py::dict>>();
+  for (const auto& pg_dict : pg_list) {
+    PropertyGroup pg;
+    pg.fill(pg_dict);
+    property_groups.emplace_back(pg);
+  }
+
+  auto source_list = config_dict["sources"].cast<std::vector<py::dict>>();
+  for (const auto& source_dict : source_list) {
+    Source src;
+    src.fill(source_dict);
+    sources.emplace_back(src);
+  }
+}
+
+void Edge::fill(const py::dict& config_dict) {
+  edge_type = config_dict["edge_type"].cast<std::string>();
+  src_type = config_dict["src_type"].cast<std::string>();
+  src_prop = config_dict["src_prop"].cast<std::string>();
+  src_edge_prop = config_dict["src_edge_prop"].cast<std::string>();
+  dst_type = config_dict["dst_type"].cast<std::string>();
+  dst_prop = config_dict["dst_prop"].cast<std::string>();
+  dst_edge_prop = config_dict["dst_edge_prop"].cast<std::string>();
+  chunk_size = config_dict["chunk_size"].cast<int>();
+  validate_level = config_dict["validate_level"].cast<std::string>();
+  prefix = config_dict["prefix"].cast<std::string>();
+
+  auto adj_list_dicts = config_dict["adj_lists"].cast<std::vector<py::dict>>();
+  for (const auto& adj_list_dict : adj_list_dicts) {
+    AdjList adj_list;
+    adj_list.fill(adj_list_dict);
+    adj_lists.emplace_back(adj_list);
+  }
+}
+
+void AdjList::fill(const py::dict& config_dict) {
+  ordered = config_dict["ordered"].cast<bool>();
+  aligned_by = config_dict["aligned_by"].cast<std::string>();
+  file_type = config_dict["file_type"].cast<std::string>();
+}
+
 ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
   ImportConfig import_config;
 
@@ -53,56 +108,14 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
   auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
   for (const auto& vertex_dict : vertices_list) {
     Vertex vertex;
-    vertex.type = vertex_dict["type"].cast<std::string>();
-    vertex.chunk_size = vertex_dict["chunk_size"].cast<int>();
-    vertex.prefix = vertex_dict["prefix"].cast<std::string>();
-    vertex.validate_level = vertex_dict["validate_level"].cast<std::string>();
-    vertex.labels = vertex_dict["labels"].cast<std::vector<std::string>>();
-
-    auto pg_list = vertex_dict["property_groups"].cast<std::vector<py::dict>>();
-    for (const auto& pg_dict : pg_list) {
-      PropertyGroup pg;
-      pg.fill(pg_dict);
-      vertex.property_groups.emplace_back(pg);
-    }
-
-    auto source_list = vertex_dict["sources"].cast<std::vector<py::dict>>();
-    for (const auto& source_dict : source_list) {
-      Source src;
-      src.file_type = source_dict["file_type"].cast<std::string>();
-      src.path = source_dict["path"].cast<std::vector<std::string>>();
-      src.delimiter = source_dict["delimiter"].cast<char>();
-      src.columns = source_dict["columns"]
-                        .cast<std::unordered_map<std::string, std::string>>();
-
-      vertex.sources.emplace_back(src);
-    }
-
+    vertex.fill(vertex_dict);
     import_config.import_schema.vertices.emplace_back(vertex);
   }
 
   auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
   for (const auto& edge_dict : edges_list) {
     Edge edge;
-    edge.edge_type = edge_dict["edge_type"].cast<std::string>();
-    edge.src_type = edge_dict["src_type"].cast<std::string>();
-    edge.src_prop = edge_dict["src_prop"].cast<std::string>();
-    edge.src_edge_prop = edge_dict["src_edge_prop"].cast<std::string>();
-    edge.dst_type = edge_dict["dst_type"].cast<std::string>();
-    edge.dst_prop = edge_dict["dst_prop"].cast<std::string>();
-    edge.dst_edge_prop = edge_dict["dst_edge_prop"].cast<std::string>();
-    edge.chunk_size = edge_dict["chunk_size"].cast<int>();
-    edge.validate_level = edge_dict["validate_level"].cast<std::string>();
-    edge.prefix = edge_dict["prefix"].cast<std::string>();
-
-    auto adj_list_dicts = edge_dict["adj_lists"].cast<std::vector<py::dict>>();
-    for (const auto& adj_list_dict : adj_list_dicts) {
-      AdjList adj_list;
-      adj_list.ordered = adj_list_dict["ordered"].cast<bool>();
-      adj_list.aligned_by = adj_list_dict["aligned_by"].cast<std::string>();
-      adj_list.file_type = adj_list_dict["file_type"].cast<std::string>();
-      edge.adj_lists.emplace_back(adj_list);
-    }
+    edge.fill(edge_dict);
 
     auto edge_pg_list =
         edge_dict["property_groups"].cast<std::vector<py::dict>>();

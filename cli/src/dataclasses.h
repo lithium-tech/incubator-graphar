@@ -40,6 +40,8 @@ struct Source {
   std::vector<std::string> path;
   char delimiter;
   std::unordered_map<std::string, std::string> columns;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct Vertex {
@@ -50,16 +52,25 @@ struct Vertex {
   std::string prefix;
   std::vector<PropertyGroup> property_groups;
   std::vector<Source> sources;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct MergeVertex: public Vertex {
     std::string join_on;
+
+    void fill(const py::dict& config_dict) {
+      Vertex::fill(config_dict);
+      join_on = config_dict["join_on"].cast<std::string>();
+    }
 };
 
 struct AdjList {
   bool ordered;
   std::string aligned_by;
   std::string file_type;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct Edge {
@@ -76,11 +87,22 @@ struct Edge {
   std::vector<AdjList> adj_lists;
   std::vector<PropertyGroup> property_groups;
   std::vector<Source> sources;
+
+  void fill(const py::dict& config_dict);
 };
 
 struct ImportSchema {
   std::vector<Vertex> vertices;
   std::vector<Edge> edges;
+
+  void fill(const py::dict& config_dict) {
+    auto vertices_list = config_dict["vertices"].cast<std::vector<py::dict>>();
+    for (const auto& vertex_dict : vertices_list) {
+      Vertex vertex;
+      vertex.fill(vertex_dict);
+      vertices.emplace_back(vertex);
+    }
+  }
 };
 
 struct MergeSchema {
