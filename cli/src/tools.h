@@ -89,6 +89,20 @@ void Edge::fill(const py::dict& config_dict) {
     adj_list.fill(adj_list_dict);
     adj_lists.emplace_back(adj_list);
   }
+
+  auto pg_list = config_dict["property_groups"].cast<std::vector<py::dict>>();
+  for (const auto& pg_dict : pg_list) {
+    PropertyGroup pg;
+    pg.fill(pg_dict);
+    property_groups.emplace_back(pg);
+  }
+
+  auto source_list = config_dict["sources"].cast<std::vector<py::dict>>();
+  for (const auto& source_dict : source_list) {
+    Source src;
+    src.fill(source_dict);
+    sources.emplace_back(src);
+  }
 }
 
 void AdjList::fill(const py::dict& config_dict) {
@@ -116,40 +130,6 @@ ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
   for (const auto& edge_dict : edges_list) {
     Edge edge;
     edge.fill(edge_dict);
-
-    auto edge_pg_list =
-        edge_dict["property_groups"].cast<std::vector<py::dict>>();
-    for (const auto& edge_pg_dict : edge_pg_list) {
-      PropertyGroup edge_pg;
-      edge_pg.file_type = edge_pg_dict["file_type"].cast<std::string>();
-      auto edge_prop_list =
-          edge_pg_dict["properties"].cast<std::vector<py::dict>>();
-
-      for (const auto& prop_dict : edge_prop_list) {
-        Property edge_prop;
-        edge_prop.name = prop_dict["name"].cast<std::string>();
-        edge_prop.data_type = prop_dict["data_type"].cast<std::string>();
-        edge_prop.is_primary = prop_dict["is_primary"].cast<bool>();
-        edge_prop.nullable = prop_dict["nullable"].cast<bool>();
-        edge_pg.properties.emplace_back(edge_prop);
-      }
-
-      edge.property_groups.emplace_back(edge_pg);
-    }
-
-    auto edge_source_list = edge_dict["sources"].cast<std::vector<py::dict>>();
-    for (const auto& edge_source_dict : edge_source_list) {
-      Source edge_src;
-      edge_src.file_type = edge_source_dict["file_type"].cast<std::string>();
-      edge_src.path = edge_source_dict["path"].cast<std::vector<std::string>>();
-      edge_src.delimiter = edge_source_dict["delimiter"].cast<char>();
-      edge_src.columns =
-          edge_source_dict["columns"]
-              .cast<std::unordered_map<std::string, std::string>>();
-
-      edge.sources.emplace_back(edge_src);
-    }
-
     import_config.import_schema.edges.emplace_back(edge);
   }
 
