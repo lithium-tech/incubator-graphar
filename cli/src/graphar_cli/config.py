@@ -111,7 +111,7 @@ class Property(BaseModel):
 
 class PropertyGroup(BaseModel):
     properties: List[Property]
-    file_type: Optional[FileType] = None
+    file_type: Optional[FileType] = DEFAULT_FILE_TYPE
 
     @field_validator("properties")
     def check_properties_length(cls, v):
@@ -286,6 +286,11 @@ class MergeConfig(BaseModel):
     @model_validator(mode="after")
     def check_merge(self) -> Self:
         for vertex in self.merge_schema.vertices:
+            # TODO: get real chuck size ??? 
+            if vertex.chunk_size is None:
+                vertex.chunk_size = self.graphar.vertex_chunk_size
+            if vertex.validate_level is None:
+                vertex.validate_level = self.graphar.validate_level
 
             # check if 'join_on' field exists
             path_to_graph = f"{self.graphar.path}/{self.graphar.name}.yaml"
@@ -296,6 +301,11 @@ class MergeConfig(BaseModel):
         
         possible_vertex_types = get_vertex_types(f"{self.graphar.path}/{self.graphar.name}.yaml")
         for edge in self.merge_schema.edges:
+            # TODO: get real params ???
+            if edge.chunk_size is None:
+                edge.chunk_size = self.graphar.edge_chunk_size
+            if edge.validate_level is None:
+                edge.validate_level = self.graphar.validate_level
             # check src_type & dst_type vertices exist
             if edge.src_type not in possible_vertex_types:
                 msg = f"Edge src: {edge.src_type} does not exist."

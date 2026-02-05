@@ -8,7 +8,12 @@ namespace py = pybind11;
 
 std::string DoMerge(const py::dict& config_dict)
 {
-    std::cout << "Mege started" << std::endl;
+    logger("Mege started");
+
+    // getting config data
+    MergeConfig merge_config;
+    merge_config.fill(config_dict);
+
     return "Merged successfully!";
 }
 
