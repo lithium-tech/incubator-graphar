@@ -42,7 +42,9 @@
 
 std::string DoImport(const py::dict& config_dict) {
   logger("Start of import");
-  auto import_config = ConvertPyDictToConfig(config_dict);
+
+  ImportConfig import_config;
+  import_config.fill(config_dict);
 
   auto version =
       graphar::InfoVersion::Parse(import_config.graphar_config.version).value();

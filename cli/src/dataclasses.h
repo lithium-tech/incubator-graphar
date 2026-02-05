@@ -91,18 +91,21 @@ struct Edge {
   void fill(const py::dict& config_dict);
 };
 
+template <typename Data>
+void fill_data(std::vector<Data>& out,
+               const std::vector<py::dict>& config)
+{
+  for (const auto& obj_dict : config) {
+    Data obj;
+    obj.fill(obj_dict);
+    out.emplace_back(obj);
+  }
+}
+
+
 struct ImportSchema {
   std::vector<Vertex> vertices;
   std::vector<Edge> edges;
-
-  void fill(const py::dict& config_dict) {
-    auto vertices_list = config_dict["vertices"].cast<std::vector<py::dict>>();
-    for (const auto& vertex_dict : vertices_list) {
-      Vertex vertex;
-      vertex.fill(vertex_dict);
-      vertices.emplace_back(vertex);
-    }
-  }
 };
 
 struct MergeSchema {
@@ -110,14 +113,47 @@ struct MergeSchema {
     std::vector<Edge> edges;
 };
 
-struct MergeConfig {
+struct AbstractConfig {
   GraphArConfig graphar_config;
-  MergeSchema merge_schema;
   bool debug_mode;
+
+  virtual void fill(const py::dict& config_dict) = 0;
 };
 
-struct ImportConfig {
-  GraphArConfig graphar_config;
+struct MergeConfig: public AbstractConfig {
+  MergeSchema merge_schema;
+  virtual void fill(const py::dict& config_dict) override {
+    // graph description
+    auto graphar_dict = config_dict["graphar"].cast<py::dict>();
+    graphar_config.fill(graphar_dict);
+
+    // vertices + edges 
+    auto schema_dict = config_dict["merge_schema"].cast<py::dict>();
+    if (schema_dict.contains("vertices")) {
+      auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
+      fill_data(merge_schema.vertices, vertices_list);
+    }
+
+    if (schema_dict.contains("edges")) {
+      auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
+      fill_data(merge_schema.edges, edges_list);
+    }
+  } 
+};
+
+struct ImportConfig: public AbstractConfig {
   ImportSchema import_schema;
-  bool debug_mode;
+  virtual void fill(const py::dict& config_dict) override {
+    // graph description
+    auto graphar_dict = config_dict["graphar"].cast<py::dict>();
+    graphar_config.fill(graphar_dict);
+
+    // vertices + edges 
+    auto schema_dict = config_dict["import_schema"].cast<py::dict>();
+    auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
+    fill_data(import_schema.vertices, vertices_list);
+
+    auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
+    fill_data(import_schema.edges, edges_list);
+  } 
 };

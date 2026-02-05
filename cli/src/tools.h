@@ -111,27 +111,24 @@ void AdjList::fill(const py::dict& config_dict) {
   file_type = config_dict["file_type"].cast<std::string>();
 }
 
-ImportConfig ConvertPyDictToConfig(const py::dict& config_dict) {
-  ImportConfig import_config;
-
+/*void ConvertPyDictToConfig(const py::dict& config_dict, AbstractConfig& config) {
+  // graph description
   auto graphar_dict = config_dict["graphar"].cast<py::dict>();
-  import_config.graphar_config.fill(graphar_dict);
+  config.graphar_config.fill(graphar_dict);
 
-  auto schema_dict = config_dict["import_schema"].cast<py::dict>();
-
+  // vertices + edges 
+  auto schema_dict = config_dict[config.config_name()].cast<py::dict>();
   auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
   for (const auto& vertex_dict : vertices_list) {
     Vertex vertex;
     vertex.fill(vertex_dict);
-    import_config.import_schema.vertices.emplace_back(vertex);
+    config.import_schema.vertices.emplace_back(vertex);
   }
 
   auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
   for (const auto& edge_dict : edges_list) {
     Edge edge;
     edge.fill(edge_dict);
-    import_config.import_schema.edges.emplace_back(edge);
+    config.import_schema.edges.emplace_back(edge);
   }
-
-  return import_config;
-}
+}*/
