@@ -187,7 +187,7 @@ def merge_data(
     try:
         with Path(config_file).open(encoding="utf-8") as file:
             config = yaml.safe_load(file)
-        merge_config = MergeConfig(**config, debug_mode=debug_mode)  # TODO: remove warning
+        merge_config = MergeConfig(**config, debug_mode=debug_mode)
         #validate(merge_config) TODO: make my validation
     except Exception as e:
         logger.error("Invalid config: %s", e)
