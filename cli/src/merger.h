@@ -36,15 +36,15 @@ std::string DoMerge(const py::dict& config_dict)
     // 4. For each element in new table, get internal graphAr index-> Add data to this posotion
     // 5. Dump
 
-    // 1. Add info to vertices
+    // 1. Add attributes to vertices
     logger("Processing vertices");
     for (const auto& vertex : merge_config.merge_schema.vertices) {
 
-        // Go to the graph description yml's and load information about this vertex
+        // 1.1 Go to the graph description yml's and load information about this vertex
         logger("Processing vertex <"+vertex.type+">.");
         auto vertex_info = graph_info->GetVertexInfo(vertex.type);
 
-        // Read info about property groups that will be added
+        // 1.2 Read info about property groups that will be added and add to the current information
         // TODO: note: this looks a lot like importer.h, we probably need refactoring 
         logger("  Reading PG that should be added.");
         std::string primary_key;
@@ -84,6 +84,53 @@ std::string DoMerge(const py::dict& config_dict)
         auto res = vertex_info_updated->Save(save_path / file_name);
         vertices_info.push_back(vertex_info_updated);
         logger("  Saved updated vertex description.");
+
+        // Create vertex property writer to save new data
+        auto save_path_str = save_path.string();
+        save_path_str += "/";
+        auto vertex_prop_writer = graphar::VertexPropertyWriter::Make(
+                                    vertex_info_updated, save_path_str,
+                                    StringToValidateLevel(vertex.validate_level))
+                                    .value();
+
+        // 1.3 Read graph's vertices' columns with PK and graphar index
+        // 1.3.1 Read graph's original PG to find user's PK there
+        std::vector<std::shared_ptr<graphar::PropertyGroup>> original_pgs = vertex_info->GetPropertyGroups();
+        std::shared_ptr<graphar::PropertyGroup> pg_with_user_PK;
+        for(auto& pg: original_pgs) {
+            for (const auto& prop : pg->GetProperties()) {
+                if (prop.name == vertex.join_on) {
+                    pg_with_user_PK = pg;
+                    break;
+                }
+            }
+        }
+        if (pg_with_user_PK.get() == nullptr) {
+            throw std::runtime_error("No property '"+vertex.join_on+"' found in original schema.");
+        }
+        std::string path_original = merge_config.graphar_config.path + '/' + 
+                                    vertex_info->GetPathPrefix(pg_with_user_PK).value();
+        logger("  Looking for original data in "+path_original);
+
+        // 1.3.2 Read graph's PG that contains user's PK
+        std::shared_ptr<arrow::Table> table;
+        {
+            std::vector<std::string> column_names = {graphar::GeneralParams::kVertexIndexCol, vertex.join_on};
+            std::vector<std::shared_ptr<arrow::Table>> file_tables;
+            for (const auto& file : std::filesystem::directory_iterator(path_original)) {
+                 // We should change that if we want graphar not only in parquet
+                file_tables.push_back(GetDataFromParquetFile(file.path().string(), column_names));
+            }
+            table = ConcatenateTables(file_tables).ValueOrDie();
+            logger("  Original vertices read.");
+        }
+
+        // 1.3.3 Save map[user_pk] = graphar_index
+        std::unordered_map<std::shared_ptr<arrow::Scalar>, graphar::IdType,
+                   arrow::Scalar::Hash, arrow::Scalar::PtrsEqual> pk2index = TableToUnorderedMap(
+                    table, vertex.join_on, graphar::GeneralParams::kVertexIndexCol
+                );
+        logger("  Map created.");
     }
 
     return "Merged successfully!";
