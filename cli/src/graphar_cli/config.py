@@ -134,7 +134,7 @@ class Source(BaseModel):
 
         path = Path(v)
         pattern = str(path.relative_to(path.anchor))
-        files = list(Path(path.anchor).glob(pattern))
+        files = list(Path(path.anchor).glob(pattern))  # this is where folder is unpacked
 
         for file in files:
             if not file.is_file():

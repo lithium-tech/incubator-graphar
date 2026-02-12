@@ -264,6 +264,59 @@ std::shared_ptr<arrow::Table> GetDataFromJsonFile(
   return table;
 }
 
+arrow::Result<std::shared_ptr<arrow::RecordBatchReader>> OpenParquetAsBatch(
+    const std::string& path, const std::vector<std::string>& column_names) {
+
+  ARROW_ASSIGN_OR_RAISE(auto input, arrow::io::ReadableFile::Open(path));
+  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
+
+  ARROW_RETURN_NOT_OK(parquet::arrow::OpenFile(input, arrow::default_memory_pool(), &parquet_reader));
+
+  // Retrieve the Arrow schema from the Parquet file
+  std::shared_ptr<arrow::Schema> schema;
+  ARROW_RETURN_NOT_OK(parquet_reader->GetSchema(&schema));
+
+  // Map column names to their indices in the schema
+  std::vector<int> column_indices;
+  column_indices.reserve(column_names.size());
+  for (const auto& col_name : column_names) {
+    int64_t index = schema->GetFieldIndex(col_name);
+    if (index == -1) {
+      return arrow::Status::Invalid("Column not found in schema: " + col_name);
+    }
+    column_indices.push_back(index);
+  }
+
+  // Create batch reader
+  std::vector<int> row_groups(parquet_reader->num_row_groups());
+  std::iota(row_groups.begin(), row_groups.end(), 0);
+
+  std::shared_ptr<arrow::RecordBatchReader> batch_reader;
+  ARROW_RETURN_NOT_OK(
+      parquet_reader->GetRecordBatchReader(
+          row_groups,
+          column_indices,
+          &batch_reader));
+
+  return batch_reader;
+}
+
+std::shared_ptr<arrow::RecordBatchReader> GetDataAsBatch(
+        const std::string& path, const std::vector<std::string>& column_names,
+        const char& delimiter=',', const std::string& file_type="parquet") {
+
+    if (file_type == "parquet") {
+      auto result = OpenParquetAsBatch(path, column_names);
+      if (!result.ok()) {
+        throw std::runtime_error("Colud not open file: " + path);
+      }
+      return result.ValueOrDie();;
+    } else {
+      // TODO: add csv, orc, json, any imprtant format
+      throw std::runtime_error("Unsupported file type: " + file_type);
+    }
+}
+
 std::shared_ptr<arrow::Table> GetDataFromFile(
     const std::string& path, const std::vector<std::string>& column_names,
     const char& delimiter, const std::string& file_type) {

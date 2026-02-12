@@ -4,6 +4,11 @@
 #include <filesystem>
 #include <pybind11/pybind11.h>
 #include "pybind11/stl.h"
+#include "util.h"
+
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+#include <parquet/arrow/reader.h>
 
 /**
  * Этот комментарий нужен для записывания мгновенных идей.
@@ -131,6 +136,21 @@ std::string DoMerge(const py::dict& config_dict)
                     table, vertex.join_on, graphar::GeneralParams::kVertexIndexCol
                 );
         logger("  Map created.");
+
+        // 1.3.4 Read new data batch-wise, put it into right table
+        for(Source source : vertex.sources) {
+            // Read source's column names
+            std::vector<std::string> new_column_names;
+            for (const auto& [key, value] : source.columns) {
+                new_column_names.emplace_back(key);
+            }
+
+            // Read source batch-wise
+            for (int i = 0; i < source.path.size(); ++i) {
+                std::shared_ptr<arrow::RecordBatchReader> batch_reader = 
+                    GetDataAsBatch(source.path[i], new_column_names, source.delimiter, source.file_type);
+            }
+        }
     }
 
     return "Merged successfully!";
