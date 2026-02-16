@@ -53,10 +53,8 @@ std::string DoImport(const py::dict& config_dict) {
   std::unordered_map<std::string, graphar::IdType> vertex_chunk_sizes;
   std::unordered_map<std::string, int64_t> vertex_counts;
 
-  std::map<std::pair<std::string, std::string>,
-           std::unordered_map<std::shared_ptr<arrow::Scalar>, graphar::IdType,
-                              arrow::Scalar::Hash, arrow::Scalar::PtrsEqual>>
-      vertex_prop_index_map;
+  std::map<std::pair<std::string, std::string>, 
+           std::unordered_map<int64_t, graphar::IdType>> vertex_prop_index_map;
 
   std::unordered_map<std::string, std::vector<std::string>>
       vertex_props_in_edges;
@@ -200,7 +198,7 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& vertex_prop : vertex_props_in_edges[vertex.type]) {
         if (vertex_prop_index_map.find(std::make_pair(vertex.type, vertex_prop)) == vertex_prop_index_map.end()) {
           vertex_prop_index_map[std::make_pair(vertex.type, vertex_prop)] =
-              TableToUnorderedMap(vertex_table_with_index, vertex_prop,
+              TableToUnorderedMapInt64(vertex_table_with_index, vertex_prop,
                                   graphar::GeneralParams::kVertexIndexCol);
         }
       }
@@ -406,10 +404,12 @@ std::string DoImport(const py::dict& config_dict) {
         if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
             adj_list->GetType() == graphar::AdjListType::unordered_by_source)
         {
-          auto edge_src_column =  // getting column
+          auto edge_src_column_raw =  // getting column
                 combined_edge_table->GetColumnByName(edge.src_edge_prop);
+          auto edge_src_column = std::static_pointer_cast<arrow::Int64Array>(edge_src_column_raw->chunk(0));
 
-          auto edge_src = edge_src_column->GetScalar(row).ValueOrDie();
+          auto edge_src = edge_src_column->Value(row);
+          std::cout << edge_src << " ";
           auto src_key = std::make_pair(edge.src_type, edge.src_prop);
           auto& src_map = vertex_prop_index_map.at(src_key);
           auto val = src_map.find(edge_src);
@@ -418,9 +418,9 @@ std::string DoImport(const py::dict& config_dict) {
           {
             #pragma omp critical
             {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << row 
-                        << "type: " << edge_src->type->ToString() 
-                        << "thead: " << omp_get_thread_num()
+              std::cout << "[Error: mapping] Could not find object in vertex_prop_index_map, row (src): " << row 
+                        << " type: " << edge_src 
+                        << " thead: " << omp_get_thread_num()
                         << std::endl;
             }
             failed = true;
@@ -432,9 +432,11 @@ std::string DoImport(const py::dict& config_dict) {
         }
         else
         {
-          auto edge_dst_column =
+          auto edge_dst_column_raw =
                 combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-          auto edge_dst = edge_dst_column->GetScalar(row).ValueOrDie();
+          auto edge_dst_column = std::static_pointer_cast<arrow::Int64Array>(edge_dst_column_raw->chunk(0));
+
+          auto edge_dst = edge_dst_column->Value(row);
           auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
           auto& dst_map = vertex_prop_index_map.at(dst_key);
           auto val = dst_map.find(edge_dst);
@@ -443,8 +445,8 @@ std::string DoImport(const py::dict& config_dict) {
           {
             #pragma omp critical
             {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << row 
-                        << "type: " << edge_dst->type->ToString() 
+              std::cout << "[Error: mapping] Could not find object in vertex_prop_index_map, row (dst):" << row 
+                        << "type: " << edge_dst 
                         << "thead: " << omp_get_thread_num()
                         << std::endl;
             }
@@ -457,7 +459,7 @@ std::string DoImport(const py::dict& config_dict) {
         }
         if(failed)
         {
-          #pragma omp critical
+          /*#pragma omp critical
           {
             for (int col = 0; col < combined_edge_table->num_columns(); ++col) {
               const auto& field = combined_edge_table->schema()->field(col);
@@ -468,7 +470,7 @@ std::string DoImport(const py::dict& config_dict) {
               std::string value_str = scalar->ToString();
               std::cout << "col: " << column_name << " value: " << value_str << std::endl;
             }
-          }
+          }*/
         }
         else
         {
@@ -493,10 +495,13 @@ std::string DoImport(const py::dict& config_dict) {
       #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
       for(int chunk = 0; chunk < num_of_chunks; ++chunk)
       {
-        auto edge_src_column =
+        auto edge_src_column_raw =
           combined_edge_table->GetColumnByName(edge.src_edge_prop);
-        auto edge_dst_column =
+        auto edge_dst_column_raw =
           combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+
+        auto edge_src_column = std::static_pointer_cast<arrow::Int64Array>(edge_src_column_raw->chunk(0));
+        auto edge_dst_column = std::static_pointer_cast<arrow::Int64Array>(edge_dst_column_raw->chunk(0));
 
         //we should gather each thread's info about rows in this very chuck 
         for(int thread_output = 0; thread_output < num_threads; ++thread_output)
@@ -509,30 +514,36 @@ std::string DoImport(const py::dict& config_dict) {
 
             //debug: check src
             auto src_key = std::make_pair(edge.src_type, edge.src_prop);
-            auto edge_src = edge_src_column->GetScalar(i).ValueOrDie();
+            auto edge_src = edge_src_column->Value(i);
             auto& src_map = vertex_prop_index_map[src_key];
             auto val_src = src_map.find(edge_src);
             if (val_src == src_map.end())
             {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src):" << i 
-                        << "type: " << edge_src->type->ToString() 
-                        << "thead: " << omp_get_thread_num()
+              #pragma omp critical
+              {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src): " << i 
+                        << " value: " << edge_src 
+                        << " thead: " << omp_get_thread_num()
                         << std::endl;
               failed = true;
+              }
             }
 
             //debug: check dst
-            auto edge_dst = edge_dst_column->GetScalar(i).ValueOrDie();
+            auto edge_dst = edge_dst_column->Value(i);
             auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
             auto& dst_map = vertex_prop_index_map[dst_key];
             auto val_dst = dst_map.find(edge_dst);
             if (val_dst == dst_map.end())
             {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst):" << i 
-                        << "type: " << edge_dst->type->ToString() 
-                        << "thead: " << omp_get_thread_num()
+              #pragma omp critical
+              {
+              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst): " << i 
+                        << " value: " << edge_dst
+                        << " thead: " << omp_get_thread_num()
                         << std::endl;
               failed = true;
+              }
             }
 
             if (failed)
