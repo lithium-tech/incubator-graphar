@@ -40,6 +40,145 @@
 #include <fstream>
 #include <malloc.h>
 
+template <typename ArrowArrayType>
+void PreProcessArray(
+    const std::shared_ptr<arrow::Array>& column,
+    std::vector<std::vector<std::vector<int64_t>>>& edge_to_chunk_mapping,
+    std::unordered_map<int64_t, graphar::IdType>& vertex_prop_index_map,
+    int num_threads,
+    int chunk_size)
+{
+    auto arr = std::static_pointer_cast<ArrowArrayType>(column);
+    const auto* data = arr->raw_values();
+    int64_t length = arr->length();
+
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    for (int64_t i = 0; i < length; ++i) {
+
+        int thread_id = omp_get_thread_num();
+        int64_t key = static_cast<int64_t>(data[i]);
+
+        auto val = vertex_prop_index_map.find(key);
+
+        if (val == vertex_prop_index_map.end()) {
+
+            #pragma omp critical
+            {
+                std::cout << "[Error: mapping] Could not find object in vertex_prop_index_map, row: " << i
+                          << " value: " << key
+                          << " thread: " << thread_id
+                          << std::endl;
+            }
+            continue;
+        }
+
+        edge_to_chunk_mapping[thread_id][val->second / chunk_size].push_back(i);
+    }
+}
+
+template <typename ArrowArrayType>
+void ProcessArray(
+    const std::shared_ptr<arrow::Table>& combined_edge_table,
+    std::vector<std::vector<std::vector<int64_t>>>& edge_to_chunk_mapping,
+    std::map<std::pair<std::string, std::string>, 
+           std::unordered_map<int64_t, graphar::IdType>>& vertex_prop_index_map,
+    std::shared_ptr<graphar::builder::EdgesBuilder> edge_builder,
+    const std::vector<std::string>& edge_column_names,
+    const Edge& edge, int num_threads, int num_of_chunks)
+{
+  auto src_column =
+      combined_edge_table->GetColumnByName(edge.src_edge_prop);
+  auto dst_column =
+      combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+
+  const auto* src_data = std::static_pointer_cast<ArrowArrayType>(src_column)->raw_values();
+  const auto* dst_data = std::static_pointer_cast<ArrowArrayType>(dst_column)->raw_values();
+
+  int processed_chunks = 0;
+  #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
+  for(int chunk = 0; chunk < num_of_chunks; ++chunk)
+  {
+    for(int thread_output = 0; thread_output < num_threads; ++thread_output)
+    {
+      for(auto i : edge_to_chunk_mapping[thread_output][chunk])
+      {
+        bool failed = false;
+
+        //debug: check src
+        int64_t edge_src = static_cast<int64_t>(src_data[i]);
+        auto src_key = std::make_pair(edge.src_type, edge.src_prop);
+        auto& src_map = vertex_prop_index_map[src_key];
+        auto val_src = src_map.find(edge_src);
+        if (val_src == src_map.end())
+        {
+          #pragma omp critical
+          {
+          std::cout << "[ERROR:BUILD] Could not find object in vertex_prop_index_map, row (src): " << i 
+                    << " value: " << edge_src 
+                    << " thead: " << omp_get_thread_num()
+                    << std::endl;
+          failed = true;
+          }
+        }
+
+        //debug: check dst
+        int64_t edge_dst = static_cast<int64_t>(dst_data[i]);
+        auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
+        auto& dst_map = vertex_prop_index_map[dst_key];
+        auto val_dst = dst_map.find(edge_dst);
+        if (val_dst == dst_map.end())
+        {
+          #pragma omp critical
+          {
+          std::cout << "[ERROR:BUILD] Could not find object in vertex_prop_index_map, row (dst): " << i 
+                    << " value: " << edge_dst
+                    << " thead: " << omp_get_thread_num()
+                    << std::endl;
+          failed = true;
+          }
+        }
+
+        if (failed)
+        {
+          continue;
+        }
+
+        graphar::builder::Edge e(
+          val_src->second,   //src id
+          val_dst->second    //dst id
+        );
+
+        //reserve space for its' properties
+        e.Reserve(edge_column_names.size()-2);
+
+        //find properties and add them
+        for (const auto& column_name : edge_column_names) {
+          if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
+            auto column = combined_edge_table->GetColumnByName(column_name);
+            auto column_type = column->type();
+            std::any value;
+            TryToCastToAny(
+                graphar::DataType::ArrowDataTypeToDataType(column_type),
+                column->chunk(0), value, i);
+            if (value.has_value()) {
+              e.AddProperty(edge_builder->GetColumnName(column_name), value);  
+            }
+          }
+        }
+        edge_builder->AddEdge(e);
+      }
+    }
+    //the chunk is ready, dump it
+    edge_builder->Dump(chunk);
+
+    #pragma omp atomic
+    ++processed_chunks;
+
+    logger("chunk: "+std::to_string(processed_chunks)+"/"+std::to_string(num_of_chunks));
+  }
+}
+
+
 std::string DoImport(const py::dict& config_dict) {
   logger("Start of import");
 
@@ -391,12 +530,54 @@ std::string DoImport(const py::dict& config_dict) {
         std::vector<std::vector<int64_t>>(num_of_chunks)
       );
 
-      auto edge_src = combined_edge_table->GetColumnByName(edge.src_edge_prop)->GetScalar(0).ValueOrDie();
-      auto edge_dst = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->GetScalar(0).ValueOrDie();
+      //auto edge_src = combined_edge_table->GetColumnByName(edge.src_edge_prop)->GetScalar(0).ValueOrDie();
+      //auto edge_dst = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->GetScalar(0).ValueOrDie();
 
       //mapping each row to its' chunk
       std::cout << "Num rows: " << num_rows << std::endl;
-      #pragma omp parallel for schedule(static) num_threads(num_threads)
+      if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
+            adj_list->GetType() == graphar::AdjListType::unordered_by_source)
+      {
+        auto edge_src_column_raw =
+                combined_edge_table->GetColumnByName(edge.src_edge_prop);
+        auto array = edge_src_column_raw->chunk(0);
+
+        if (array->type_id() == arrow::Type::INT64) {
+            PreProcessArray<arrow::Int64Array>(
+                array, edge_to_chunk_mapping,
+                vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
+                num_threads, edge_info->GetSrcChunkSize());
+        }
+        else if (array->type_id() == arrow::Type::INT32) {
+            PreProcessArray<arrow::Int32Array>(
+                array, edge_to_chunk_mapping,
+                vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
+                num_threads, edge_info->GetDstChunkSize());
+        }
+        else {
+            throw std::runtime_error("Unsupported type");
+        }
+      } else {
+        auto edge_dst_column_raw =
+                combined_edge_table->GetColumnByName(edge.dst_edge_prop);
+        auto array = edge_dst_column_raw->chunk(0);
+        if (array->type_id() == arrow::Type::INT64) {
+            PreProcessArray<arrow::Int64Array>(
+                array, edge_to_chunk_mapping,
+                vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
+                num_threads, edge_info->GetSrcChunkSize());
+        }
+        else if (array->type_id() == arrow::Type::INT32) {
+            PreProcessArray<arrow::Int32Array>(
+                array, edge_to_chunk_mapping,
+                vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
+                num_threads, edge_info->GetDstChunkSize());
+        }
+        else {
+            throw std::runtime_error("Unsupported type");
+        }
+      }
+/*      #pragma omp parallel for schedule(static) num_threads(num_threads)
       for (int64_t row = 0; row < num_rows; ++row)
       {
         int64_t chunk = 0;
@@ -470,7 +651,7 @@ std::string DoImport(const py::dict& config_dict) {
               std::string value_str = scalar->ToString();
               std::cout << "col: " << column_name << " value: " << value_str << std::endl;
             }
-          }*/
+          }
         }
         else
         {
@@ -478,9 +659,9 @@ std::string DoImport(const py::dict& config_dict) {
           /*if(row % 1000000000 == 0)
           {
             malloc_stats();
-          }*/
+          }
         }
-      }
+      }*/
       
       // add column names
       for (const auto& column_name : edge_column_names) {
