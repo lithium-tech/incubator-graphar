@@ -76,7 +76,7 @@ void PreProcessArray(
     }
 }
 
-template <typename ArrowArrayType>
+template <typename SrcArrayType, typename DstArrayType>
 void ProcessArray(
     const std::shared_ptr<arrow::Table>& combined_edge_table,
     std::vector<std::vector<std::vector<int64_t>>>& edge_to_chunk_mapping,
@@ -91,8 +91,9 @@ void ProcessArray(
   auto dst_column =
       combined_edge_table->GetColumnByName(edge.dst_edge_prop);
 
-  const auto* src_data = std::static_pointer_cast<ArrowArrayType>(src_column)->raw_values();
-  const auto* dst_data = std::static_pointer_cast<ArrowArrayType>(dst_column)->raw_values();
+  const auto* src_data = std::static_pointer_cast<SrcArrayType>(src_column->chunk(0))->raw_values();
+  const auto* dst_data = std::static_pointer_cast<DstArrayType>(dst_column->chunk(0))->raw_values();
+  // TODO: need offsets?
 
   int processed_chunks = 0;
   #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
@@ -535,6 +536,9 @@ std::string DoImport(const py::dict& config_dict) {
 
       //mapping each row to its' chunk
       std::cout << "Num rows: " << num_rows << std::endl;
+      arrow::Type::type src_prop_type = combined_edge_table->GetColumnByName(edge.src_edge_prop)->chunk(0)->type_id();
+      arrow::Type::type dst_prop_type = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->chunk(0)->type_id();
+
       if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
             adj_list->GetType() == graphar::AdjListType::unordered_by_source)
       {
@@ -542,13 +546,13 @@ std::string DoImport(const py::dict& config_dict) {
                 combined_edge_table->GetColumnByName(edge.src_edge_prop);
         auto array = edge_src_column_raw->chunk(0);
 
-        if (array->type_id() == arrow::Type::INT64) {
+        if (src_prop_type == arrow::Type::INT64) {
             PreProcessArray<arrow::Int64Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
                 num_threads, edge_info->GetSrcChunkSize());
         }
-        else if (array->type_id() == arrow::Type::INT32) {
+        else if (src_prop_type == arrow::Type::INT32) {
             PreProcessArray<arrow::Int32Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
@@ -561,13 +565,14 @@ std::string DoImport(const py::dict& config_dict) {
         auto edge_dst_column_raw =
                 combined_edge_table->GetColumnByName(edge.dst_edge_prop);
         auto array = edge_dst_column_raw->chunk(0);
-        if (array->type_id() == arrow::Type::INT64) {
+
+        if (dst_prop_type == arrow::Type::INT64) {
             PreProcessArray<arrow::Int64Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
                 num_threads, edge_info->GetSrcChunkSize());
         }
-        else if (array->type_id() == arrow::Type::INT32) {
+        else if (dst_prop_type == arrow::Type::INT32) {
             PreProcessArray<arrow::Int32Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
@@ -672,8 +677,36 @@ std::string DoImport(const py::dict& config_dict) {
 
       //starting edge building: adding edges chunk-wise
       logger("Edge building: start");
+      if (src_prop_type == arrow::Type::INT64 && dst_prop_type == arrow::Type::INT64)
+          ProcessArray<arrow::Int64Array, arrow::Int64Array>(combined_edge_table, edge_to_chunk_mapping, 
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+          );
+      else if (src_prop_type == arrow::Type::INT64 && dst_prop_type == arrow::Type::INT32)
+          ProcessArray<arrow::Int64Array, arrow::Int32Array>(combined_edge_table, edge_to_chunk_mapping, 
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+          );
+      else if (src_prop_type == arrow::Type::INT32 && dst_prop_type == arrow::Type::INT64)
+          ProcessArray<arrow::Int32Array, arrow::Int64Array>(combined_edge_table, edge_to_chunk_mapping, 
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+          );
+      else if (src_prop_type == arrow::Type::INT32 && dst_prop_type == arrow::Type::INT32)
+          ProcessArray<arrow::Int32Array, arrow::Int32Array>(combined_edge_table, edge_to_chunk_mapping, 
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+          );
+      else
+          throw std::runtime_error("Unsupported type combination");
+      
+      /*if (vertex_prop_type == arrow::Type::INT64) {
+      }
+      else if (vertex_prop_type == arrow::Type::INT32) {
+          ProcessArray<arrow::Int32Array>(
+            combined_edge_table, edge_to_chunk_mapping, 
+            vertex_prop_index_map, edge_builder,
+            edge_column_names, edge, num_threads, num_of_chunks
+          );
+      }*/
+      /*#pragma omp parallel for schedule(dynamic) num_threads(num_threads)
       int processed_chunks = 0;
-      #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
       for(int chunk = 0; chunk < num_of_chunks; ++chunk)
       {
         auto edge_src_column_raw =
@@ -764,7 +797,7 @@ std::string DoImport(const py::dict& config_dict) {
         ++processed_chunks;
 
         logger("chunk: "+std::to_string(processed_chunks)+"/"+std::to_string(num_of_chunks));
-      }
+      }*/
     }
   }
 
