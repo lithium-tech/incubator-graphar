@@ -105,7 +105,6 @@ void ProcessArray(
       {
         bool failed = false;
 
-        //debug: check src
         int64_t edge_src = static_cast<int64_t>(src_data[i]);
         auto src_key = std::make_pair(edge.src_type, edge.src_prop);
         auto& src_map = vertex_prop_index_map[src_key];
@@ -122,7 +121,6 @@ void ProcessArray(
           }
         }
 
-        //debug: check dst
         int64_t edge_dst = static_cast<int64_t>(dst_data[i]);
         auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
         auto& dst_map = vertex_prop_index_map[dst_key];
@@ -169,7 +167,7 @@ void ProcessArray(
         edge_builder->AddEdge(e);
       }
     }
-    //the chunk is ready, dump it
+    //the chunk is ready, save it
     edge_builder->Dump(chunk);
 
     #pragma omp atomic
@@ -201,7 +199,7 @@ std::string DoImport(const py::dict& config_dict) {
   std::map<std::pair<std::string, std::string>, graphar::Property>
       vertex_prop_property_map;
   for (const auto& edge : import_config.import_schema.edges) {
-    vertex_props_in_edges[edge.src_type].emplace_back(edge.src_prop);  //duplicates, but they weight not so much
+    vertex_props_in_edges[edge.src_type].emplace_back(edge.src_prop);
     vertex_props_in_edges[edge.dst_type].emplace_back(edge.dst_prop);
   }
 
@@ -299,7 +297,6 @@ std::string DoImport(const py::dict& config_dict) {
             }
           }
         }
-        // TODO: check this
         if (column != prop.name ||
             arrow_column->type()->id() != arrow_data_type->id()) {
           columns_to_change[column] =
@@ -311,8 +308,6 @@ std::string DoImport(const py::dict& config_dict) {
     }
     std::shared_ptr<arrow::Table> merged_vertex_table =
         MergeTables(vertex_tables);
-    // TODO: check all fields in props
-    // TODO: add start_index in config
     graphar::IdType start_chunk_index = 0;
 
     auto vertex_table_with_index =
@@ -374,15 +369,13 @@ std::string DoImport(const py::dict& config_dict) {
           graphar::StringToFileType(adj_list.file_type)));
     }
     logger("  edge <"+edge.edge_type+"> Adj list: end");
-    // TODO: add directed parameter in config
 
     bool directed = true;
-    // TODO: whether prefix has default value?
 
     auto edge_info = graphar::CreateEdgeInfo(
         edge.src_type, edge.edge_type, edge.dst_type, edge.chunk_size,
         vertex_chunk_sizes[edge.src_type], vertex_chunk_sizes[edge.dst_type],
-        directed, adj_lists, pgs, edge.prefix, version);  //[MY TODO] pgs can be deleted now
+        directed, adj_lists, pgs, edge.prefix, version);
     auto file_name =
         ConcatEdgeTriple(edge.src_type, edge.edge_type, edge.dst_type) +
         ".edge.yaml";
@@ -412,7 +405,7 @@ std::string DoImport(const py::dict& config_dict) {
       for (const auto& source : edge.sources) {
         logger("edge <"+edge.edge_type+"> reading files: start");
 
-        std::vector<std::string> column_names; //[MY TODO] resrve
+        std::vector<std::string> column_names;
         for (const auto& [key, value] : source.columns) {
           column_names.emplace_back(key);
         }
@@ -463,7 +456,6 @@ std::string DoImport(const py::dict& config_dict) {
           auto arrow_data_type =
               graphar::DataType::DataTypeToArrowDataType(prop.type);
           auto arrow_column = table->GetColumnByName(column);
-          // TODO: is needed?
           if (!prop.is_nullable) {
             for (const auto& chunk : arrow_column->chunks()) {
               if (chunk->null_count() > 0) {
@@ -490,9 +482,9 @@ std::string DoImport(const py::dict& config_dict) {
       std::shared_ptr<arrow::Table> merged_edge_table =
           MergeTables(edge_tables);
       logger("Tables merged");
-      // TODO: check all fields in props
+
       auto combined_edge_table =
-          merged_edge_table->CombineChunks().ValueOrDie();  //[My] we moved edge_tables, so memory should not raise
+          merged_edge_table->CombineChunks().ValueOrDie();
       logger("Combined_edge_table created");
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
@@ -509,7 +501,7 @@ std::string DoImport(const py::dict& config_dict) {
 
       const int64_t num_rows = combined_edge_table->num_rows();
 
-      //(multi-thread) mapping row to its' bucket
+      //(multi-thread) mapping row to its bucket
       int num_threads =  omp_get_max_threads() / 2;
       std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
       
@@ -525,16 +517,13 @@ std::string DoImport(const py::dict& config_dict) {
         num_of_chunks = (vertex_counts[edge.dst_type] - 1) / vertex_chunk_sizes[edge.dst_type] + 1;
       }
 
-      //creating vector that maps row to its' chunk: [num_of_threads][num_of_chunks][rows]
+      //creating vector that maps row to its chunk: [num_of_threads][num_of_chunks][rows]
       std::vector<std::vector<std::vector<int64_t>>> edge_to_chunk_mapping(
         num_threads,
         std::vector<std::vector<int64_t>>(num_of_chunks)
       );
 
-      //auto edge_src = combined_edge_table->GetColumnByName(edge.src_edge_prop)->GetScalar(0).ValueOrDie();
-      //auto edge_dst = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->GetScalar(0).ValueOrDie();
-
-      //mapping each row to its' chunk
+      //mapping each row to its chunk
       std::cout << "Num rows: " << num_rows << std::endl;
       arrow::Type::type src_prop_type = combined_edge_table->GetColumnByName(edge.src_edge_prop)->chunk(0)->type_id();
       arrow::Type::type dst_prop_type = combined_edge_table->GetColumnByName(edge.dst_edge_prop)->chunk(0)->type_id();
@@ -582,92 +571,7 @@ std::string DoImport(const py::dict& config_dict) {
             throw std::runtime_error("Unsupported type");
         }
       }
-/*      #pragma omp parallel for schedule(static) num_threads(num_threads)
-      for (int64_t row = 0; row < num_rows; ++row)
-      {
-        int64_t chunk = 0;
-        bool failed = false; //debug
-        if (adj_list->GetType() == graphar::AdjListType::ordered_by_source ||
-            adj_list->GetType() == graphar::AdjListType::unordered_by_source)
-        {
-          auto edge_src_column_raw =  // getting column
-                combined_edge_table->GetColumnByName(edge.src_edge_prop);
-          auto edge_src_column = std::static_pointer_cast<arrow::Int64Array>(edge_src_column_raw->chunk(0));
 
-          auto edge_src = edge_src_column->Value(row);
-          std::cout << edge_src << " ";
-          auto src_key = std::make_pair(edge.src_type, edge.src_prop);
-          auto& src_map = vertex_prop_index_map.at(src_key);
-          auto val = src_map.find(edge_src);
-
-          if (val == src_map.end())
-          {
-            #pragma omp critical
-            {
-              std::cout << "[Error: mapping] Could not find object in vertex_prop_index_map, row (src): " << row 
-                        << " type: " << edge_src 
-                        << " thead: " << omp_get_thread_num()
-                        << std::endl;
-            }
-            failed = true;
-          }
-          if(!failed)
-          {
-            chunk = val->second / edge_info->GetSrcChunkSize();
-          }
-        }
-        else
-        {
-          auto edge_dst_column_raw =
-                combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-          auto edge_dst_column = std::static_pointer_cast<arrow::Int64Array>(edge_dst_column_raw->chunk(0));
-
-          auto edge_dst = edge_dst_column->Value(row);
-          auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
-          auto& dst_map = vertex_prop_index_map.at(dst_key);
-          auto val = dst_map.find(edge_dst);
-
-          if (val == dst_map.end())
-          {
-            #pragma omp critical
-            {
-              std::cout << "[Error: mapping] Could not find object in vertex_prop_index_map, row (dst):" << row 
-                        << "type: " << edge_dst 
-                        << "thead: " << omp_get_thread_num()
-                        << std::endl;
-            }
-            failed = true;
-          }
-          if (!failed)
-          {
-            chunk = val->second / edge_info->GetDstChunkSize();
-          }
-        }
-        if(failed)
-        {
-          /*#pragma omp critical
-          {
-            for (int col = 0; col < combined_edge_table->num_columns(); ++col) {
-              const auto& field = combined_edge_table->schema()->field(col);
-              std::string column_name = field->name();
-
-              auto column = combined_edge_table->column(col);
-              auto scalar = column->GetScalar(row).ValueOrDie();
-              std::string value_str = scalar->ToString();
-              std::cout << "col: " << column_name << " value: " << value_str << std::endl;
-            }
-          }
-        }
-        else
-        {
-          edge_to_chunk_mapping[omp_get_thread_num()][chunk].push_back(row);
-          /*if(row % 1000000000 == 0)
-          {
-            malloc_stats();
-          }
-        }
-      }*/
-      
       // add column names
       for (const auto& column_name : edge_column_names) {
         if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
@@ -695,109 +599,6 @@ std::string DoImport(const py::dict& config_dict) {
           );
       else
           throw std::runtime_error("Unsupported type combination");
-      
-      /*if (vertex_prop_type == arrow::Type::INT64) {
-      }
-      else if (vertex_prop_type == arrow::Type::INT32) {
-          ProcessArray<arrow::Int32Array>(
-            combined_edge_table, edge_to_chunk_mapping, 
-            vertex_prop_index_map, edge_builder,
-            edge_column_names, edge, num_threads, num_of_chunks
-          );
-      }*/
-      /*#pragma omp parallel for schedule(dynamic) num_threads(num_threads)
-      int processed_chunks = 0;
-      for(int chunk = 0; chunk < num_of_chunks; ++chunk)
-      {
-        auto edge_src_column_raw =
-          combined_edge_table->GetColumnByName(edge.src_edge_prop);
-        auto edge_dst_column_raw =
-          combined_edge_table->GetColumnByName(edge.dst_edge_prop);
-
-        auto edge_src_column = std::static_pointer_cast<arrow::Int64Array>(edge_src_column_raw->chunk(0));
-        auto edge_dst_column = std::static_pointer_cast<arrow::Int64Array>(edge_dst_column_raw->chunk(0));
-
-        //we should gather each thread's info about rows in this very chuck 
-        for(int thread_output = 0; thread_output < num_threads; ++thread_output)
-        {
-          //visit all the rows this thread found for this chunk
-          for(auto i : edge_to_chunk_mapping[thread_output][chunk])
-          {
-            //create an edge
-            bool failed = false;
-
-            //debug: check src
-            auto src_key = std::make_pair(edge.src_type, edge.src_prop);
-            auto edge_src = edge_src_column->Value(i);
-            auto& src_map = vertex_prop_index_map[src_key];
-            auto val_src = src_map.find(edge_src);
-            if (val_src == src_map.end())
-            {
-              #pragma omp critical
-              {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (src): " << i 
-                        << " value: " << edge_src 
-                        << " thead: " << omp_get_thread_num()
-                        << std::endl;
-              failed = true;
-              }
-            }
-
-            //debug: check dst
-            auto edge_dst = edge_dst_column->Value(i);
-            auto dst_key = std::make_pair(edge.dst_type, edge.dst_prop);
-            auto& dst_map = vertex_prop_index_map[dst_key];
-            auto val_dst = dst_map.find(edge_dst);
-            if (val_dst == dst_map.end())
-            {
-              #pragma omp critical
-              {
-              std::cout << "!!! Could not find object in vertex_prop_index_map, row (dst): " << i 
-                        << " value: " << edge_dst
-                        << " thead: " << omp_get_thread_num()
-                        << std::endl;
-              failed = true;
-              }
-            }
-
-            if (failed)
-            {
-              continue;
-            }
-
-            graphar::builder::Edge e(
-              val_src->second,   //src id
-              val_dst->second    //dst id
-            );
-
-            //reserve space for its' properties
-            e.Reserve(edge_column_names.size()-2);
-
-            //find properties and add them
-            for (const auto& column_name : edge_column_names) {
-              if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
-                auto column = combined_edge_table->GetColumnByName(column_name);
-                auto column_type = column->type();
-                std::any value;
-                TryToCastToAny(
-                    graphar::DataType::ArrowDataTypeToDataType(column_type),
-                    column->chunk(0), value, i);
-                if (value.has_value()) {
-                  e.AddProperty(edge_builder->GetColumnName(column_name), value);  
-                }
-              }
-            }
-            edge_builder->AddEdge(e);
-          }
-        }
-        //the chunk is ready, dump it
-        edge_builder->Dump(chunk);
-
-        #pragma omp atomic
-        ++processed_chunks;
-
-        logger("chunk: "+std::to_string(processed_chunks)+"/"+std::to_string(num_of_chunks));
-      }*/
     }
   }
 

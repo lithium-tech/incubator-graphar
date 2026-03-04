@@ -465,7 +465,7 @@ void FillMap(const std::shared_ptr<KeyArrayType>& keys,
              std::unordered_map<int64_t, graphar::IdType>& result) {
     for (int64_t i = 0; i < keys->length(); ++i) {
         if (keys->IsNull(i) || values->IsNull(i))
-            throw std::runtime_error("Null key or value");
+            throw std::runtime_error("Null key or value in vertex PK or index columns.");
         result[static_cast<int64_t>(keys->Value(i))] = values->Value(i);
     }
 }
