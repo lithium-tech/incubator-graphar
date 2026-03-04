@@ -312,16 +312,11 @@ VertexPropertyArrowChunkReader::GetChunkV1() {
 Result<std::shared_ptr<arrow::Table>> VertexPropertyArrowChunkReader::GetChunk(
     GetChunkVersion version) {
   switch (version) {
+  case GetChunkVersion::AUTO:
   case GetChunkVersion::V1:
     return GetChunkV1();
   case GetChunkVersion::V2:
-    return GetChunkV2();
-  case GetChunkVersion::AUTO:
-    if (filter_options_.filter != nullptr) {
-      return GetChunkV1();
-    } else {
-      return GetChunkV2();
-    }
+    return Status::Invalid("GetChunkV2 is buggy, do not use it!");
   default:
     return Status::Invalid("unsupport GetChunkVersion ", version);
   }
