@@ -15,6 +15,9 @@
  * По поводу вершин: по пользовательскому(!) ПК мы можем
  * определить внутренний id графаря, а по внутреннему id
  * можно посчитать чанк и даже позицию в нем!
+ * 
+ * Звучит как какая-то незаконченная идея, но возможно в
+ * будущем я вспомню к чему это было, и поражусь.
  */
 
 namespace py = pybind11;
@@ -131,8 +134,9 @@ std::string DoMerge(const py::dict& config_dict)
         }
 
         // 1.3.3 Save map[user_pk] = graphar_index
-        std::unordered_map<std::shared_ptr<arrow::Scalar>, graphar::IdType,
-                   arrow::Scalar::Hash, arrow::Scalar::PtrsEqual> pk2index = TableToUnorderedMap(
+        // note: only int64 keys are alowed
+        // TODO: check key is int
+        std::unordered_map<int64_t, graphar::IdType> pk2index = TableToUnorderedMap(
                     table, vertex.join_on, graphar::GeneralParams::kVertexIndexCol
                 );
         logger("  Map created.");
