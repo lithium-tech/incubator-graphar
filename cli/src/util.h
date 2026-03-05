@@ -362,8 +362,10 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
     // Check if this column needs to be changed
     auto it = columns_to_change.find(original_name);
     if (it != columns_to_change.end()) {
+      std::cout << "Column to change: " << original_name << std::endl;
       std::string new_name = it->second.first;
       std::shared_ptr<arrow::DataType> new_type = it->second.second;
+      std::cout << "Original: " << original_type->ToString() << "; New: " << new_type->ToString() << std::endl;
 
       bool name_changed = (new_name != original_name);
       bool type_changed = !original_type->Equals(*new_type);
@@ -382,6 +384,7 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
           auto cast_result =
               arrow::compute::Cast(*chunk, new_type, cast_options);
           if (!cast_result.ok()) {
+            std::cerr << cast_result.status().ToString() << std::endl;
             throw std::runtime_error("Failed to cast column data.");
           }
           casted_chunks.push_back(cast_result.ValueOrDie());
@@ -453,6 +456,71 @@ std::shared_ptr<arrow::Table> MergeTables(
   auto merged_table = arrow::Table::Make(merged_schema, columns, num_rows);
 
   return merged_table;
+}
+
+
+template <typename KeyArrayType>
+void FillMap(const std::shared_ptr<KeyArrayType>& keys,
+             const std::shared_ptr<arrow::Int64Array>& values,
+             std::unordered_map<int64_t, graphar::IdType>& result) {
+    for (int64_t i = 0; i < keys->length(); ++i) {
+        if (keys->IsNull(i) || values->IsNull(i))
+            throw std::runtime_error("Null key or value in vertex PK or index columns.");
+        result[static_cast<int64_t>(keys->Value(i))] = values->Value(i);
+    }
+}
+
+std::unordered_map<int64_t, graphar::IdType>
+TableToUnorderedMapInt64(const std::shared_ptr<arrow::Table>& table,
+                    const std::string& key_column_name,
+                    const std::string& value_column_name) {
+  auto combined_table = table->CombineChunks().ValueOrDie();  // terrible decision
+  // Get the column indices
+  auto key_column_idx =
+      combined_table->schema()->GetFieldIndex(key_column_name);
+  auto value_column_idx =
+      combined_table->schema()->GetFieldIndex(value_column_name);
+  if (key_column_idx == -1) {
+    throw std::runtime_error("Key column '" + key_column_name +
+                             "' not found in the table.");
+  }
+  if (value_column_idx == -1) {
+    throw std::runtime_error("Value column '" + value_column_name +
+                             "' not found in the table.");
+  }
+
+  // Extract the columns
+  auto key_column = combined_table->column(key_column_idx);
+  auto value_column = combined_table->column(value_column_idx);
+
+  std::unordered_map<int64_t, graphar::IdType> result;
+  result.reserve(key_column->length());
+
+  // Ensure both columns have the same length
+  if (key_column->length() != value_column->length()) {
+    throw std::runtime_error("Key and value columns have different lengths.");
+  }
+
+  auto key_chunk = key_column->chunk(0);
+  auto value_chunk = value_column->chunk(0);
+
+  switch (key_chunk->type_id()) {
+    case arrow::Type::INT64:
+        FillMap(std::static_pointer_cast<arrow::Int64Array>(key_chunk),
+                std::static_pointer_cast<arrow::Int64Array>(value_chunk),
+                result);
+        break;
+
+    case arrow::Type::INT32:
+        FillMap(std::static_pointer_cast<arrow::Int32Array>(key_chunk),
+                std::static_pointer_cast<arrow::Int64Array>(value_chunk),
+                result);
+        break;
+
+    default:
+        throw std::runtime_error("Unsupported key type");
+  }
+  return result;
 }
 
 std::unordered_map<std::shared_ptr<arrow::Scalar>, graphar::IdType,

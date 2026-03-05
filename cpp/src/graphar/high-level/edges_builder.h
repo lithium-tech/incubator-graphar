@@ -201,7 +201,9 @@ class Edge {
  * @return If a is less than b: true/false.
  */
 inline bool cmp_src(const Edge& a, const Edge& b) {
-  return a.GetSource() < b.GetSource();
+  if(a.GetSource() != b.GetSource())
+    return a.GetSource() < b.GetSource();
+  return a.GetDestination() < b.GetDestination();
 }
 
 /**
@@ -212,7 +214,9 @@ inline bool cmp_src(const Edge& a, const Edge& b) {
  * @return If a is less than b: true/false.
  */
 inline bool cmp_dst(const Edge& a, const Edge& b) {
-  return a.GetDestination() < b.GetDestination();
+  if (a.GetDestination() != b.GetDestination())
+    return a.GetDestination() < b.GetDestination();
+  return a.GetSource() < b.GetSource();
 }
 
 /**
