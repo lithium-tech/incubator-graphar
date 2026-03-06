@@ -1036,6 +1036,7 @@ namespace {
 static std::string PathToDirectory(const std::string& path) {
   if (path.rfind("s3://", 0) == 0) {
     int t = path.find_last_of('?');
+    t = (t == std::string::npos) ? path.length() : t;
     std::string prefix = path.substr(0, t);
     std::string suffix = path.substr(t);
     const size_t last_slash_idx = prefix.rfind('/');
