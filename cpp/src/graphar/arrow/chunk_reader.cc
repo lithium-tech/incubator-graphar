@@ -225,6 +225,10 @@ Status VertexPropertyArrowChunkReader::seek(IdType id) {
 
 Result<std::shared_ptr<arrow::Table>>
 VertexPropertyArrowChunkReader::GetChunkV2() {
+  if (property_group_->GetFileType() != FileType::PARQUET) {
+    //fallback to v1 for non-parquet file type
+    return GetChunkV1();
+  }
   if (chunk_table_ == nullptr) {
     GAR_ASSIGN_OR_RAISE(
         auto chunk_file_path,
