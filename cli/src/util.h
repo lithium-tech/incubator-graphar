@@ -362,10 +362,8 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
     // Check if this column needs to be changed
     auto it = columns_to_change.find(original_name);
     if (it != columns_to_change.end()) {
-      std::cout << "Column to change: " << original_name << std::endl;
       std::string new_name = it->second.first;
       std::shared_ptr<arrow::DataType> new_type = it->second.second;
-      std::cout << "Original: " << original_type->ToString() << "; New: " << new_type->ToString() << std::endl;
 
       bool name_changed = (new_name != original_name);
       bool type_changed = !original_type->Equals(*new_type);

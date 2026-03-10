@@ -544,7 +544,7 @@ std::string DoImport(const py::dict& config_dict) {
         else if (src_prop_type == arrow::Type::INT32) {
             PreProcessArray<arrow::Int32Array>(
                 array, edge_to_chunk_mapping,
-                vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
+                vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
                 num_threads, edge_info->GetDstChunkSize());
         }
         else {
@@ -558,7 +558,7 @@ std::string DoImport(const py::dict& config_dict) {
         if (dst_prop_type == arrow::Type::INT64) {
             PreProcessArray<arrow::Int64Array>(
                 array, edge_to_chunk_mapping,
-                vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
+                vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
                 num_threads, edge_info->GetSrcChunkSize());
         }
         else if (dst_prop_type == arrow::Type::INT32) {

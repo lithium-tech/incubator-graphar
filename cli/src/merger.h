@@ -135,13 +135,14 @@ std::string DoMerge(const py::dict& config_dict)
 
         // 1.3.3 Save map[user_pk] = graphar_index
         // note: only int64 keys are alowed
-        // TODO: check key is int
-        std::unordered_map<int64_t, graphar::IdType> pk2index = TableToUnorderedMap(
+        // TODO: check key is int in config
+        /*std::unordered_map<int64_t, graphar::IdType> pk2index = TableToUnorderedMapInt64(
                     table, vertex.join_on, graphar::GeneralParams::kVertexIndexCol
                 );
-        logger("  Map created.");
+        logger("  Map created.");*/
 
-        // 1.3.4 Read new data batch-wise, put it into right table
+        // 1.3.3 Read new data
+        std::vector<std::shared_ptr<arrow::Table>> vertex_tables;
         for(Source source : vertex.sources) {
             // Read source's column names
             std::vector<std::string> new_column_names;
@@ -149,12 +150,28 @@ std::string DoMerge(const py::dict& config_dict)
                 new_column_names.emplace_back(key);
             }
 
-            // Read source batch-wise
-            for (int i = 0; i < source.path.size(); ++i) {
-                std::shared_ptr<arrow::RecordBatchReader> batch_reader = 
-                    GetDataAsBatch(source.path[i], new_column_names, source.delimiter, source.file_type);
+            // Read source
+            {
+                std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+                for (int i = 0; i < source.path.size(); ++i) {
+                file_tables[i] = GetDataFromFile(source.path[i], new_column_names, source.delimiter,
+                                    source.file_type);
+                }
+                std::shared_ptr<arrow::Table> table = ConcatenateTables(file_tables).ValueOrDie();
+                vertex_tables.push_back(table);
             }
         }
+        // Merge all tables with new data into a big one
+        std::shared_ptr<arrow::Table> merged_vertex_table = MergeTables(vertex_tables);
+
+        // 1.3.4 Save map[user_pk] = row-number-in-input-table
+        // note: only int64 keys are alowed
+        // TODO: check key is int in config
+        std::unordered_map<int64_t, graphar::IdType> pk2row_num;
+
+        auto pk_column = table->GetColumnByName(vertex.join_on);  // note: mey be a mistake
+        
+
     }
 
     return "Merged successfully!";
