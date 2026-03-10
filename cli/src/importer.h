@@ -545,7 +545,7 @@ std::string DoImport(const py::dict& config_dict) {
             PreProcessArray<arrow::Int32Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)), 
-                num_threads, edge_info->GetDstChunkSize());
+                num_threads, edge_info->GetSrcChunkSize());
         }
         else {
             throw std::runtime_error("Unsupported type");
@@ -559,7 +559,7 @@ std::string DoImport(const py::dict& config_dict) {
             PreProcessArray<arrow::Int64Array>(
                 array, edge_to_chunk_mapping,
                 vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)), 
-                num_threads, edge_info->GetSrcChunkSize());
+                num_threads, edge_info->GetDstChunkSize());
         }
         else if (dst_prop_type == arrow::Type::INT32) {
             PreProcessArray<arrow::Int32Array>(
