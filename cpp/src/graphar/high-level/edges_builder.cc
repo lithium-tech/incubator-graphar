@@ -81,7 +81,7 @@ Status EdgesBuilder::Dump() {
 
 Status EdgesBuilder::Dump(int chunk) {
   // construct the writer
-  EdgeChunkWriter writer(edge_info_, prefix_, adj_list_type_, validate_level_);
+  EdgeChunkWriter writer = *EdgeChunkWriter::Make(edge_info_, prefix_, adj_list_type_, validate_level_).value();
 
   // dump the offsets
   if (adj_list_type_ == AdjListType::ordered_by_source ||
