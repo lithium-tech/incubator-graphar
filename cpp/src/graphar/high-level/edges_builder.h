@@ -507,12 +507,10 @@ class EdgesBuilder {
       return std::string_view{*column_names_.find(column_name)};
   }
 
-  const std::string& GetColumnName(std::string_view column_name) const
+  const std::string* GetColumnName(std::string_view column_name) const
   {
-      auto it = column_names_.find(column_name);
-      if (it == column_names_.end())
-        return nullptr;
-      return *it;
+    auto it = column_names_.find(column_name);
+    return it == column_names_.end() ? nullptr : &*it;
   }
 
  private:
