@@ -258,6 +258,7 @@ class EdgesBuilder {
     }
     edges_.clear();
     num_edges_ = 0;
+    graph_changed_ = false;
     is_saved_ = false;
     switch (adj_list_type) {
     case AdjListType::unordered_by_source:
@@ -323,6 +324,7 @@ class EdgesBuilder {
     edges_.clear();
     num_edges_ = 0;
     is_saved_ = false;
+    graph_changed_ = false;
   }
 
   /**
@@ -356,7 +358,8 @@ class EdgesBuilder {
       edges_.resize(vertex_chunk_index + 1);
     }
     edges_[vertex_chunk_index].emplace_back(e); //std::move  ??? 
-    num_edges_++;
+    //num_edges_++;
+    graph_changed_ = true;
     return Status::OK();
   }
 
@@ -378,7 +381,15 @@ class EdgesBuilder {
    *
    * @return The current number of edges in the collection.
    */
-  IdType GetNum() const { return num_edges_; }
+  IdType GetNum() { 
+    if(!graph_changed_)
+      return num_edges_;
+    num_edges_ = 0;
+    for(int i = 0; i < edges_.size(); ++i)
+      num_edges_ += edges_[i].size();
+    graph_changed_ = false;
+    return num_edges_;
+  }
 
 //  IdType GetPreNum() const { return pre_num_edges_; }
 
@@ -603,6 +614,7 @@ class EdgesBuilder {
   IdType vertex_chunk_size_;
   IdType num_vertices_;
   IdType num_edges_;
+  bool graph_changed_;
   bool is_saved_;
   std::shared_ptr<WriterOptions> writer_options_;
   ValidateLevel validate_level_;
