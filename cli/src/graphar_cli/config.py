@@ -23,6 +23,19 @@ from typing import Dict, List, Literal, Optional  # TODO: move to the TYPE_CHECK
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing_extensions import Self
 
+from ._core import (  # type: ignore  # noqa: PGH003
+    check_edge,
+    check_graph,
+    check_vertex,
+    get_edge_count,
+    get_edge_types,
+    get_vertex_count,
+    get_vertex_types,
+    show_edge,
+    show_graph,
+    show_vertex,
+)
+
 logger = getLogger("graphar_cli")
 
 # TODO: move them to constants.py
@@ -41,7 +54,7 @@ class FileType(str, Enum):
     json = "json"
 
 
-class GraphArConfig(BaseModel):
+class GrapArBaseConfig(BaseModel):
     path: str
     name: str
     vertex_chunk_size: Optional[int] = 100
@@ -53,6 +66,8 @@ class GraphArConfig(BaseModel):
     validate_level: Literal["no", "weak", "strong"] = DEFAULT_VALIDATE_LEVEL
     version: Optional[str] = DEFAULT_VERSION
 
+
+class GraphArConfig(GrapArBaseConfig):
     @field_validator("path")
     def check_path(cls, v):
         path = Path(v).resolve().absolute()
@@ -62,6 +77,18 @@ class GraphArConfig(BaseModel):
             msg = f"Warning: Path {v} already exists and contains files."
             logger.warning(msg)
         return v
+
+
+class GraphArMergeConfig(GrapArBaseConfig):
+    @model_validator(mode='after')
+    def check_path(self):
+        path = Path(self.path).resolve().absolute()
+        if not path.exists():
+            raise ValueError(f"Path '{path}' does not exist.")
+        # check this is valid graphar in folder accroding to main .yaml
+        if not check_graph(f"{self.path}/{self.name}.yaml"):
+            raise ValueError("Graph is not valid.")
+        return self
 
 
 class Property(BaseModel):
@@ -84,7 +111,7 @@ class Property(BaseModel):
 
 class PropertyGroup(BaseModel):
     properties: List[Property]
-    file_type: Optional[FileType] = None
+    file_type: Optional[FileType] = DEFAULT_FILE_TYPE
 
     @field_validator("properties")
     def check_properties_length(cls, v):
@@ -96,17 +123,30 @@ class PropertyGroup(BaseModel):
 
 class Source(BaseModel):
     file_type: Optional[FileType] = None
-    path: str
+    path: List[str]  # str in xml
     delimiter: str = ","
     columns: Dict[str, str]
 
-    @field_validator("path")
+    @field_validator("path", mode="before")
     def check_path(cls, v):
-        path = Path(v).resolve().absolute()
-        if not path.is_file():
-            msg = f"'{path}' is not a file."
+        if not isinstance(v, str):
+            raise ValueError(f"path must be a string, not <{type(v)}>")
+
+        path = Path(v)
+        pattern = str(path.relative_to(path.anchor))
+        files = list(Path(path.anchor).glob(pattern))  # this is where folder is unpacked
+
+        for file in files:
+            if not file.is_file():
+                msg = f"'{file.resolve().absolute()}' is not a file."
+                raise ValueError(msg)
+
+        str_pathes = [str(f) for f in files]
+        if not len(files):
+            msg = f"files by mask '{path.resolve().absolute()}' not found."
             raise ValueError(msg)
-        return v
+
+        return str_pathes
 
     @field_validator("delimiter")
     def check_delimiter(cls, v):
@@ -118,9 +158,9 @@ class Source(BaseModel):
     @model_validator(mode="after")
     def check_file_type(self) -> Self:
         if not self.file_type:
-            file_type = Path(self.path).suffix.removeprefix(".")
+            file_type = Path(self.path[0]).suffix.removeprefix(".")
             if file_type == "":
-                msg = f"File {self.path} has no file type suffix"
+                msg = f"File {self.path[0]} has no file type suffix"
                 raise ValueError(msg)
             if file_type not in FileType.__members__:
                 msg = f"Invalid file type '{file_type}'"
@@ -160,6 +200,8 @@ class Vertex(BaseModel):
             self.prefix = f"vertex/{type}/"
         return self
 
+class MergeVertex(Vertex):
+    join_on: str
 
 class AdjList(BaseModel):
     ordered: bool
@@ -171,8 +213,10 @@ class Edge(BaseModel):
     edge_type: str
     src_type: str
     src_prop: str
+    src_edge_prop: str = None # Field(default_factory=lambda validate_data: validate_data["src_prop"]) # pd2.10
     dst_type: str
     dst_prop: str
+    dst_edge_prop: str = None # Field(default_factory=lambda validate_data: validate_data["dst_prop"]) # pd2.10
     chunk_size: Optional[int] = None
     validate_level: Optional[Literal["no", "weak", "strong"]] = None
     adj_lists: List[AdjList] = []
@@ -201,7 +245,25 @@ class Edge(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def check_edge_props(self) -> Self:
+        if self.src_edge_prop is None:
+            self.src_edge_prop = self.src_prop
+        if self.dst_edge_prop is None:
+            self.dst_edge_prop = self.dst_prop
+        return self
 
+
+class MergeEdge(Edge):
+    # left for future modifications
+    pass
+
+
+class MergeSchema(BaseModel):
+    vertices: List[MergeVertex]
+    edges: List[MergeEdge]
+
+        
 class ImportSchema(BaseModel):
     vertices: List[Vertex]
     edges: List[Edge]
@@ -214,11 +276,51 @@ class ImportSchema(BaseModel):
         return v
 
 
+class MergeConfig(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    graphar: GraphArMergeConfig
+    merge_schema: MergeSchema
+    debug_mode: bool
+
+    @model_validator(mode="after")
+    def check_merge(self) -> Self:
+        for vertex in self.merge_schema.vertices:
+            # TODO: get real chuck size ??? 
+            if vertex.chunk_size is None:
+                vertex.chunk_size = self.graphar.vertex_chunk_size
+            if vertex.validate_level is None:
+                vertex.validate_level = self.graphar.validate_level
+
+            # check if 'join_on' field exists
+            path_to_graph = f"{self.graphar.path}/{self.graphar.name}.yaml"
+            vertex_description =  show_vertex(path_to_graph, vertex.type)
+            if vertex.join_on not in vertex_description:
+                msg=f"Join_on field ({vertex.join_on}) not found in schema."
+                raise ValueError(msg)
+        
+        possible_vertex_types = get_vertex_types(f"{self.graphar.path}/{self.graphar.name}.yaml")
+        for edge in self.merge_schema.edges:
+            # TODO: get real params ???
+            if edge.chunk_size is None:
+                edge.chunk_size = self.graphar.edge_chunk_size
+            if edge.validate_level is None:
+                edge.validate_level = self.graphar.validate_level
+            # check src_type & dst_type vertices exist
+            if edge.src_type not in possible_vertex_types:
+                msg = f"Edge src: {edge.src_type} does not exist."
+                raise ValueError(msg)
+            if edge.dst_type not in possible_vertex_types:
+                msg = f"Edge dst: {edge.dst_type} does not exist."
+                raise ValueError(msg)
+
+
 class ImportConfig(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
     graphar: GraphArConfig
     import_schema: ImportSchema
+    debug_mode: bool
 
     @model_validator(mode="after")
     def check_none_types(self) -> Self:

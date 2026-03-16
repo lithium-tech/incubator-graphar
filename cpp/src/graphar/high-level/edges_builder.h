@@ -26,11 +26,17 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+//#include <boost/container/flat_map.hpp> //[My]
+//#include <flat_map> //[My]
+#include <set>
 
 #include "graphar/arrow/chunk_writer.h"
 #include "graphar/fwd.h"
 #include "graphar/graph_info.h"
 #include "graphar/types.h"
+
+#include <iostream> //[My]
+#include <string_view>  //[My]
 
 namespace arrow {
 class Array;
@@ -43,6 +49,31 @@ namespace graphar::builder {
  *
  */
 class Edge {
+ private:
+  IdType src_id_, dst_id_;
+  bool empty_;
+  mutable bool sorted_ = true;  // since we store everything in vector, we should sort it before using binary search
+  mutable std::vector<std::pair<std::string_view, std::any>> properties_;
+
+  /**
+   * @brief sortrs internal vector of properties
+   */
+  void sort_vector_() const
+  {
+    std::sort(properties_.begin(), properties_.end(), [](const auto &a, const auto& b){
+      return a.first < b.first;
+    });
+  }
+
+  const std::any* get_property_(const std::string& name) const
+  {
+    auto it = std::find_if(properties_.begin(), properties_.end(),
+                       [&name](const auto& p) { return p.first == name; });
+    if (it == properties_.end())
+      return nullptr;
+    return &(it->second);
+  }
+
  public:
   /**
    * @brief Initialize the edge with its source and destination.
@@ -62,7 +93,7 @@ class Edge {
 
   /**
    * @brief Get source id of the edge.
-   *
+   *S
    * @return The id of the source vertex.
    */
   inline IdType GetSource() const noexcept { return src_id_; }
@@ -81,9 +112,20 @@ class Edge {
    * @param val The value of the property.
    */
   // TODO(@acezen): Enable the property to be a vector(list).
-  inline void AddProperty(const std::string& name, const std::any& val) {
+  inline void AddProperty(std::string_view name, const std::any& val) {
     empty_ = false;
-    properties_[name] = val;
+    properties_.emplace_back(name, val);
+    sorted_ = false;
+  }
+
+  /**
+   * @brief Reserve properties_
+   * 
+   * @param size The size of properties_.
+   */
+  void Reserve(size_t size)
+  {
+    properties_.reserve(size);
   }
 
   /**
@@ -93,15 +135,18 @@ class Edge {
    * @return The value of the property.
    */
   inline const std::any& GetProperty(const std::string& property) const {
-    return properties_.at(property);
+    const std::any* ptr = get_property_(property);
+    if (!ptr)
+      throw std::runtime_error("Key not found");
+    return *ptr;
   }
 
   /**
    * @brief Get all properties of the edge.
    *
-   * @return The map containing all properties of the edge.
+   * @return The vector containing all properties of the edge.
    */
-  inline const std::unordered_map<std::string, std::any>& GetProperties()
+  inline const std::vector<std::pair<std::string_view, std::any>>& GetProperties()
       const {
     return properties_;
   }
@@ -113,13 +158,39 @@ class Edge {
    * @return true/false.
    */
   inline bool ContainProperty(const std::string& property) const {
-    return (properties_.find(property) != properties_.end());
+    return get_property_(property) != nullptr;
   }
 
- private:
-  IdType src_id_, dst_id_;
-  bool empty_;
-  std::unordered_map<std::string, std::any> properties_;
+  /**
+   * @brief Edge's move constructor.
+   */
+  Edge(Edge&& other) noexcept
+    : src_id_(other.src_id_), dst_id_(other.dst_id_), empty_(other.empty_)
+  {
+    properties_ = std::move(other.properties_);
+  }
+
+  /**
+   * @brief Move asigment operator.
+   */
+  Edge& operator=(Edge&& other) noexcept
+  {
+    properties_ = std::move(other.properties_);
+    src_id_ = other.src_id_;
+    dst_id_ = other.dst_id_;
+    empty_ = other.empty_;
+    return *this;
+  }
+
+  /**
+   * @brief Copy constructor.
+   */
+  Edge(const Edge& other) = default;
+
+  /**
+   * @brief Copy assigment.
+   */
+  Edge& operator=(const Edge& other) = default;
 };
 
 /**
@@ -130,7 +201,9 @@ class Edge {
  * @return If a is less than b: true/false.
  */
 inline bool cmp_src(const Edge& a, const Edge& b) {
-  return a.GetSource() < b.GetSource();
+  if(a.GetSource() != b.GetSource())
+    return a.GetSource() < b.GetSource();
+  return a.GetDestination() < b.GetDestination();
 }
 
 /**
@@ -141,7 +214,9 @@ inline bool cmp_src(const Edge& a, const Edge& b) {
  * @return If a is less than b: true/false.
  */
 inline bool cmp_dst(const Edge& a, const Edge& b) {
-  return a.GetDestination() < b.GetDestination();
+  if (a.GetDestination() != b.GetDestination())
+    return a.GetDestination() < b.GetDestination();
+  return a.GetSource() < b.GetSource();
 }
 
 /**
@@ -183,6 +258,7 @@ class EdgesBuilder {
     }
     edges_.clear();
     num_edges_ = 0;
+    graph_changed_ = false;
     is_saved_ = false;
     switch (adj_list_type) {
     case AdjListType::unordered_by_source:
@@ -200,6 +276,7 @@ class EdgesBuilder {
     default:
       vertex_chunk_size_ = edge_info_->GetSrcChunkSize();
     }
+    Reserve((num_vertices - 1) / vertex_chunk_size_ + 1);
   }
 
   /**
@@ -247,6 +324,7 @@ class EdgesBuilder {
     edges_.clear();
     num_edges_ = 0;
     is_saved_ = false;
+    graph_changed_ = false;
   }
 
   /**
@@ -276,8 +354,25 @@ class EdgesBuilder {
     GAR_RETURN_NOT_OK(validate(e, validate_level));
     // add an edge
     IdType vertex_chunk_index = getVertexChunkIndex(e);
-    edges_[vertex_chunk_index].push_back(e);
-    num_edges_++;
+    if (vertex_chunk_index >= edges_.size()) {
+      edges_.resize(vertex_chunk_index + 1);
+    }
+    edges_[vertex_chunk_index].emplace_back(e); //std::move  ??? 
+    //num_edges_++;
+    graph_changed_ = true;
+    return Status::OK();
+  }
+
+  Status Reserve(const int64_t &reserve_count) {
+    edges_.resize(reserve_count);
+    return Status::OK();
+  }
+
+  Status PreReserve(const std::vector<int64_t> &reserve_count) {
+    edges_.resize(reserve_count.size());
+    for (int64_t i = 0; i < reserve_count.size(); i++) {
+      edges_[i].reserve(reserve_count[i]);
+    }
     return Status::OK();
   }
 
@@ -286,7 +381,17 @@ class EdgesBuilder {
    *
    * @return The current number of edges in the collection.
    */
-  IdType GetNum() const { return num_edges_; }
+  IdType GetNum() { 
+    if(!graph_changed_)
+      return num_edges_;
+    num_edges_ = 0;
+    for(int i = 0; i < edges_.size(); ++i)
+      num_edges_ += edges_[i].size();
+    graph_changed_ = false;
+    return num_edges_;
+  }
+
+//  IdType GetPreNum() const { return pre_num_edges_; }
 
   /**
    * @brief Dump the collection into files.
@@ -294,6 +399,7 @@ class EdgesBuilder {
    * @return Status: ok or error.
    */
   Status Dump();
+  Status Dump(int chunk);
 
   /**
    * @brief Construct an EdgesBuilder from edge info.
@@ -375,6 +481,36 @@ class EdgesBuilder {
     }
     return Make(edge_info, graph_info->GetPrefix(), adj_list_type, num_vertices,
                 nullptr, validate_level);
+  }
+
+  /**
+   * @brief add column name to the set of column names, so we can have std::string_view of it instead of copy
+   * 
+   * @param column_name The name of the column
+   */
+  void AddColumnName(const std::string& column_name)
+  {
+    column_names_.insert(column_name);
+  }
+
+  /**
+   * @brief given a column name, return a string_view on it
+   * 
+   * @param column_name the name of the column
+   */
+  std::string_view GetColumnName(const std::string& column_name)
+  {
+      if (column_names_.find(column_name) == column_names_.end())  // if we do not have this name, we should add it
+      {
+          AddColumnName(column_name);
+      }
+      return std::string_view{*column_names_.find(column_name)};
+  }
+
+  const std::string* GetColumnName(std::string_view column_name) const
+  {
+    auto it = column_names_.find(column_name);
+    return it == column_names_.end() ? nullptr : &*it;
   }
 
  private:
@@ -472,13 +608,38 @@ class EdgesBuilder {
   std::shared_ptr<EdgeInfo> edge_info_;
   std::string prefix_;
   AdjListType adj_list_type_;
-  std::unordered_map<IdType, std::vector<Edge>> edges_;
+  std::vector<std::vector<Edge>> edges_;
   IdType vertex_chunk_size_;
   IdType num_vertices_;
   IdType num_edges_;
+  bool graph_changed_;
   bool is_saved_;
   std::shared_ptr<WriterOptions> writer_options_;
   ValidateLevel validate_level_;
+
+  struct StringComparator{
+    using is_transparent = void;
+
+    bool operator()(const std::string& a, const std::string& b) const noexcept
+    {
+      return a < b;
+    }
+
+    bool operator()(std::string_view a, const std::string& b) const noexcept
+    {
+      std::cout << "Comparing view, string\n";
+      return a < b;
+    }
+
+    bool operator()(const std::string& a, std::string_view b) const noexcept
+    {
+      std::cout << "Comparing string, view\n";
+      return a < b;
+    }
+  };
+  std::set<std::string, StringComparator> column_names_;  // we store all possible column names here, so we don't have to store multiple copies of them
+  bool InOrder = true;                  // DEBUG: for later usage of vector 
+
 };
 
 }  // namespace graphar::builder

@@ -205,7 +205,7 @@ Status AdjListChunkInfoReader::seek(IdType index) {
   return Status::OK();
 }
 
-Result<std::string> AdjListChunkInfoReader::GetChunk() {
+Result<std::string> AdjListChunkInfoReader::GetChunk() { //[My] Miron mentioned it
   GAR_ASSIGN_OR_RAISE(auto chunk_file_path,
                       edge_info_->GetAdjListFilePath(
                           vertex_chunk_index_, chunk_index_, adj_list_type_));

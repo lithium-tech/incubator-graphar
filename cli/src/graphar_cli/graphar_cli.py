@@ -27,6 +27,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     check_graph,
     check_vertex,
     do_import,
+    #do_merge,
     get_edge_count,
     get_edge_types,
     get_vertex_count,
@@ -35,7 +36,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     show_graph,
     show_vertex,
 )
-from .config import ImportConfig
+from .config import ImportConfig, MergeConfig
 from .importer import validate
 from .logging import setup_logging
 
@@ -146,6 +147,7 @@ def check(
 )
 def import_data(
     config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr config file"),
+    debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
 ):
     if not Path(config_file).is_file():
         logger.error("File not found: %s", config_file)
@@ -154,7 +156,7 @@ def import_data(
     try:
         with Path(config_file).open(encoding="utf-8") as file:
             config = yaml.safe_load(file)
-        import_config = ImportConfig(**config)
+        import_config = ImportConfig(**config, debug_mode=debug_mode)
         validate(import_config)
     except Exception as e:
         logger.error("Invalid config: %s", e)
@@ -165,6 +167,38 @@ def import_data(
         logger.info(res)
     except Exception as e:
         logger.error("Import failed: %s", e)
+        raise typer.Exit(1) from None
+
+
+@app.command(
+    "merge",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Merge data to existing GraphAr graph",
+    no_args_is_help=True,
+)
+def merge_data(
+    config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr merge config file"),
+    debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+):
+    if not Path(config_file).is_file():
+        logger.error("File not found: %s", config_file)
+        raise typer.Exit(1)
+
+    try:
+        with Path(config_file).open(encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        merge_config = MergeConfig(**config, debug_mode=debug_mode)
+        #validate(merge_config) TODO: make my validation
+    except Exception as e:
+        logger.error("Invalid config: %s", e)
+        raise typer.Exit(1) from None
+    try:
+        logger.info("Starting merge")
+        raise NotImplementedError("Merge not implemented yet.")
+        #res = do_merge(merge_config.model_dump()) # TODO: make my C++ code
+        #logger.info(res)
+    except Exception as e:
+        logger.error("Merge failed: %s", e)
         raise typer.Exit(1) from None
 
 

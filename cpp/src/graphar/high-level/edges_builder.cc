@@ -24,6 +24,8 @@
 #include "graphar/high-level/edges_builder.h"
 #include "graphar/result.h"
 
+#include <iostream>
+
 namespace graphar::builder {
 
 Status EdgesBuilder::Dump() {
@@ -33,25 +35,23 @@ Status EdgesBuilder::Dump() {
   // construct empty edge collections for vertex chunks without edges
   IdType num_vertex_chunks =
       (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
-  for (IdType i = 0; i < num_vertex_chunks; i++)
-    if (edges_.find(i) == edges_.end()) {
-      std::vector<Edge> empty_chunk_edges;
-      edges_[i] = empty_chunk_edges;
-    }
+  if (edges_.size() < num_vertex_chunks) {
+    edges_.resize(num_vertex_chunks);
+  }
   // dump the offsets
   if (adj_list_type_ == AdjListType::ordered_by_source ||
       adj_list_type_ == AdjListType::ordered_by_dest) {
-    for (auto& chunk_edges : edges_) {
-      IdType vertex_chunk_index = chunk_edges.first;
+    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
+         vertex_chunk_index++) {
       // sort the edges
       if (adj_list_type_ == AdjListType::ordered_by_source)
-        sort(chunk_edges.second.begin(), chunk_edges.second.end(), cmp_src);
+        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_src);
       if (adj_list_type_ == AdjListType::ordered_by_dest)
-        sort(chunk_edges.second.begin(), chunk_edges.second.end(), cmp_dst);
+        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_dst);
       // construct and write offset chunk
       GAR_ASSIGN_OR_RAISE(
           auto offset_table,
-          getOffsetTable(vertex_chunk_index, chunk_edges.second));
+          getOffsetTable(vertex_chunk_index, edges_[vertex_chunk_index]));
       GAR_RETURN_NOT_OK(
           writer.WriteOffsetChunk(offset_table, vertex_chunk_index));
     }
@@ -59,27 +59,62 @@ Status EdgesBuilder::Dump() {
   // dump the vertex num
   GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
   // dump the edge nums
-  IdType vertex_chunk_num =
+  IdType vertex_chunk_num =  //[My] duplicate of num_vertex_chunks? ok...
       (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
   for (IdType vertex_chunk_index = 0; vertex_chunk_index < vertex_chunk_num;
        vertex_chunk_index++) {
-    if (edges_.find(vertex_chunk_index) == edges_.end()) {
-      GAR_RETURN_NOT_OK(writer.WriteEdgesNum(vertex_chunk_index, 0));
-    } else {
-      GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
-          vertex_chunk_index, edges_[vertex_chunk_index].size()));
+    GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
+        vertex_chunk_index, edges_[vertex_chunk_index].size()));
     }
-  }
-  // dump the edges
-  for (auto& chunk_edges : edges_) {
-    IdType vertex_chunk_index = chunk_edges.first;
+    // dump the edges
+    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
+         vertex_chunk_index++) {
     // convert to table
-    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(chunk_edges.second));
+    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
     // write table
     GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
-    chunk_edges.second.clear();
+    edges_[vertex_chunk_index].clear();
   }
   is_saved_ = true;
+  return Status::OK();
+}
+
+Status EdgesBuilder::Dump(int chunk) {
+  // construct the writer
+  EdgeChunkWriter writer = *EdgeChunkWriter::Make(edge_info_, prefix_, adj_list_type_, validate_level_).value();
+
+  // dump the offsets
+  if (adj_list_type_ == AdjListType::ordered_by_source ||
+      adj_list_type_ == AdjListType::ordered_by_dest) {
+
+    // sort the edges
+    if (adj_list_type_ == AdjListType::ordered_by_source)
+      sort(edges_[chunk].begin(), edges_[chunk].end(), cmp_src);
+    if (adj_list_type_ == AdjListType::ordered_by_dest)
+      sort(edges_[chunk].begin(), edges_[chunk].end(), cmp_dst);
+
+    // construct and write offset chunk
+    GAR_ASSIGN_OR_RAISE(
+        auto offset_table,
+        getOffsetTable(chunk, edges_[chunk]));
+    GAR_RETURN_NOT_OK(
+        writer.WriteOffsetChunk(offset_table, chunk));
+  }
+
+  // dump the vertex num
+  GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
+  // dump the edge nums
+  GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
+      chunk, edges_[chunk].size()));
+
+  // dump the edges
+  // convert to table
+  GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[chunk])); //property issues
+  // write table
+  GAR_RETURN_NOT_OK(writer.WriteTable(input_table, chunk, 0)); 
+  edges_[chunk].clear();
+  std::vector<Edge>().swap(edges_[chunk]);
+
   return Status::OK();
 }
 
@@ -109,14 +144,19 @@ Status EdgesBuilder::validate(const Edge& e,
   // strong validate
   if (validate_level == ValidateLevel::strong_validate) {
     for (auto& property : e.GetProperties()) {
+
+      const std::string* str_property = GetColumnName(property.first);
+      if (!str_property) {
+        return Status::KeyError("Column ", property.first, " not found in EdgesBuilder.");
+      }
       // check if the property is contained
-      if (!edge_info_->HasProperty(property.first)) {
-        return Status::KeyError("Property with name ", property.first,
+      if (!edge_info_->HasProperty(*str_property)) {
+        return Status::KeyError("Property with name ", *str_property,
                                 " is not contained in the ",
                                 edge_info_->GetEdgeType(), " edge info.");
       }
       // check if the property type is correct
-      auto type = edge_info_->GetPropertyType(property.first).value();
+      auto type = edge_info_->GetPropertyType(*str_property).value();
       bool invalid_type = false;
       switch (type->id()) {
       case Type::BOOL:
@@ -174,7 +214,7 @@ Status EdgesBuilder::validate(const Edge& e,
       }
       if (invalid_type) {
         return Status::TypeError(
-            "Invalid data type for property ", property.first + ", defined as ",
+            "Invalid data type for property ", *str_property + ", defined as ",
             type->ToTypeName(), ", but got ", property.second.type().name());
       }
     }
@@ -307,9 +347,11 @@ Result<std::shared_ptr<arrow::Table>> EdgesBuilder::convertToTable(
       schema_vector.push_back(arrow::field(
           property.name, DataType::DataTypeToArrowDataType(property.type)));
       // add a column to data
+      // data here is ok
       std::shared_ptr<arrow::Array> array;
       GAR_RETURN_NOT_OK(
           appendToArray(property.type, property.name, array, edges));
+      int64_t null_count = array->null_count();
       arrays.push_back(array);
     }
   }
