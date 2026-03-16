@@ -27,7 +27,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     check_graph,
     check_vertex,
     do_import,
-    do_merge,
+    #do_merge,
     get_edge_count,
     get_edge_types,
     get_vertex_count,
@@ -194,8 +194,9 @@ def merge_data(
         raise typer.Exit(1) from None
     try:
         logger.info("Starting merge")
-        res = do_merge(merge_config.model_dump()) # TODO: make my C++ code
-        logger.info(res)
+        raise NotImplementedError("Merge not implemented yet.")
+        #res = do_merge(merge_config.model_dump()) # TODO: make my C++ code
+        #logger.info(res)
     except Exception as e:
         logger.error("Merge failed: %s", e)
         raise typer.Exit(1) from None
