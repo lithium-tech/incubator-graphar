@@ -111,7 +111,7 @@ std::shared_ptr<ds::FileFormat> FileSystem::GetFileFormat(
   }
 }
 
-Result<std::shared_ptr<arrow::Table>> FileSystem::ReadFileToTable(
+Result<std::shared_ptr<arrow::Table>> FileSystem::ReadFileToTable(  //[My research]
     const std::string& path, FileType file_type,
     const std::vector<int>& column_indices) const noexcept {
   parquet::arrow::FileReaderBuilder builder;

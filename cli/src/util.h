@@ -19,6 +19,16 @@
 
 #pragma once
 
+#include <iostream>
+#include <sys/resource.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <fstream>
+ #include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 #ifdef ARROW_ORC
 #include "arrow/adapters/orc/adapter.h"
 #endif
@@ -59,6 +69,7 @@ std::shared_ptr<arrow::Table> SelectColumns(
     throw std::runtime_error("No column names provided.");
   }
   std::vector<int> indices;
+  indices.reserve(column_names.size());
   for (const auto& name : column_names) {
     auto column_index = table->schema()->GetFieldIndex(name);
     if (column_index != -1) {
@@ -95,6 +106,7 @@ std::shared_ptr<arrow::Table> GetDataFromParquetFile(
 
   // Map column names to their indices in the schema
   std::vector<int> column_indices;
+  column_indices.reserve(column_names.size());
   for (const auto& col_name : column_names) {
     int64_t index = schema->GetFieldIndex(col_name);
     if (index == -1) {
@@ -248,6 +260,59 @@ std::shared_ptr<arrow::Table> GetDataFromJsonFile(
   return table;
 }
 
+arrow::Result<std::shared_ptr<arrow::RecordBatchReader>> OpenParquetAsBatch(
+    const std::string& path, const std::vector<std::string>& column_names) {
+
+  ARROW_ASSIGN_OR_RAISE(auto input, arrow::io::ReadableFile::Open(path));
+  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
+
+  ARROW_RETURN_NOT_OK(parquet::arrow::OpenFile(input, arrow::default_memory_pool(), &parquet_reader));
+
+  // Retrieve the Arrow schema from the Parquet file
+  std::shared_ptr<arrow::Schema> schema;
+  ARROW_RETURN_NOT_OK(parquet_reader->GetSchema(&schema));
+
+  // Map column names to their indices in the schema
+  std::vector<int> column_indices;
+  column_indices.reserve(column_names.size());
+  for (const auto& col_name : column_names) {
+    int64_t index = schema->GetFieldIndex(col_name);
+    if (index == -1) {
+      return arrow::Status::Invalid("Column not found in schema: " + col_name);
+    }
+    column_indices.push_back(index);
+  }
+
+  // Create batch reader
+  std::vector<int> row_groups(parquet_reader->num_row_groups());
+  std::iota(row_groups.begin(), row_groups.end(), 0);
+
+  std::shared_ptr<arrow::RecordBatchReader> batch_reader;
+  ARROW_RETURN_NOT_OK(
+      parquet_reader->GetRecordBatchReader(
+          row_groups,
+          column_indices,
+          &batch_reader));
+
+  return batch_reader;
+}
+
+std::shared_ptr<arrow::RecordBatchReader> GetDataAsBatch(
+        const std::string& path, const std::vector<std::string>& column_names,
+        const char& delimiter=',', const std::string& file_type="parquet") {
+
+    if (file_type == "parquet") {
+      auto result = OpenParquetAsBatch(path, column_names);
+      if (!result.ok()) {
+        throw std::runtime_error("Colud not open file: " + path);
+      }
+      return result.ValueOrDie();;
+    } else {
+      // TODO: add csv, orc, json, any imprtant format
+      throw std::runtime_error("Unsupported file type: " + file_type);
+    }
+}
+
 std::shared_ptr<arrow::Table> GetDataFromFile(
     const std::string& path, const std::vector<std::string>& column_names,
     const char& delimiter, const std::string& file_type) {
@@ -280,6 +345,8 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
   // Prepare vectors for new schema fields and new column data
   std::vector<std::shared_ptr<arrow::Field>> new_fields;
   std::vector<std::shared_ptr<arrow::ChunkedArray>> new_columns;
+  new_fields.reserve(num_columns);
+  new_columns.reserve(num_columns);
 
   for (int64_t i = 0; i < num_columns; ++i) {
     auto original_field = original_schema->field(i);
@@ -302,6 +369,7 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
       // If data type needs to be changed, cast each chunk
       if (type_changed) {
         std::vector<std::shared_ptr<arrow::Array>> casted_chunks;
+        casted_chunks.reserve(original_column->num_chunks());
         for (const auto& chunk : original_column->chunks()) {
           // Perform type casting using Compute API
           arrow::compute::CastOptions cast_options;
@@ -310,6 +378,7 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
           auto cast_result =
               arrow::compute::Cast(*chunk, new_type, cast_options);
           if (!cast_result.ok()) {
+            std::cerr << cast_result.status().ToString() << std::endl;
             throw std::runtime_error("Failed to cast column data.");
           }
           casted_chunks.push_back(cast_result.ValueOrDie());
@@ -362,6 +431,12 @@ std::shared_ptr<arrow::Table> MergeTables(
   // Prepare a vector to hold all the columns from the input tables
   std::vector<std::shared_ptr<arrow::Field>> fields;
   std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+  int64_t num_columns = 0;
+  for (const auto& table : tables) {
+    num_columns += table->num_columns();
+  }
+  fields.reserve(num_columns);
+  columns.reserve(num_columns);
 
   for (const auto& table : tables) {
     for (int64_t i = 0; i < table->num_columns(); ++i) {
@@ -375,6 +450,71 @@ std::shared_ptr<arrow::Table> MergeTables(
   auto merged_table = arrow::Table::Make(merged_schema, columns, num_rows);
 
   return merged_table;
+}
+
+
+template <typename KeyArrayType>
+void FillMap(const std::shared_ptr<KeyArrayType>& keys,
+             const std::shared_ptr<arrow::Int64Array>& values,
+             std::unordered_map<int64_t, graphar::IdType>& result) {
+    for (int64_t i = 0; i < keys->length(); ++i) {
+        if (keys->IsNull(i) || values->IsNull(i))
+            throw std::runtime_error("Null key or value in vertex PK or index columns.");
+        result[static_cast<int64_t>(keys->Value(i))] = values->Value(i);
+    }
+}
+
+std::unordered_map<int64_t, graphar::IdType>
+TableToUnorderedMapInt64(const std::shared_ptr<arrow::Table>& table,
+                    const std::string& key_column_name,
+                    const std::string& value_column_name) {
+  auto combined_table = table->CombineChunks().ValueOrDie();  // terrible decision
+  // Get the column indices
+  auto key_column_idx =
+      combined_table->schema()->GetFieldIndex(key_column_name);
+  auto value_column_idx =
+      combined_table->schema()->GetFieldIndex(value_column_name);
+  if (key_column_idx == -1) {
+    throw std::runtime_error("Key column '" + key_column_name +
+                             "' not found in the table.");
+  }
+  if (value_column_idx == -1) {
+    throw std::runtime_error("Value column '" + value_column_name +
+                             "' not found in the table.");
+  }
+
+  // Extract the columns
+  auto key_column = combined_table->column(key_column_idx);
+  auto value_column = combined_table->column(value_column_idx);
+
+  std::unordered_map<int64_t, graphar::IdType> result;
+  result.reserve(key_column->length());
+
+  // Ensure both columns have the same length
+  if (key_column->length() != value_column->length()) {
+    throw std::runtime_error("Key and value columns have different lengths.");
+  }
+
+  auto key_chunk = key_column->chunk(0);
+  auto value_chunk = value_column->chunk(0);
+
+  switch (key_chunk->type_id()) {
+    case arrow::Type::INT64:
+        FillMap(std::static_pointer_cast<arrow::Int64Array>(key_chunk),
+                std::static_pointer_cast<arrow::Int64Array>(value_chunk),
+                result);
+        break;
+
+    case arrow::Type::INT32:
+        FillMap(std::static_pointer_cast<arrow::Int32Array>(key_chunk),
+                std::static_pointer_cast<arrow::Int64Array>(value_chunk),
+                result);
+        break;
+
+    default:
+        throw std::runtime_error("Unsupported key type");
+  }
+  return result;
 }
 
 std::unordered_map<std::shared_ptr<arrow::Scalar>, graphar::IdType,
@@ -482,3 +622,86 @@ graphar::Status TryToCastToAny(const std::shared_ptr<graphar::DataType>& type,
   }
   return graphar::Status::OK();
 }
+
+class MemUsage {
+public:
+  MemUsage();
+  long GetMaxMemoryUsageInMb() const;
+  long GetCurrentMemoryUsageInMb() const;
+  void print(bool up = false, bool down = true) const;
+private:
+  static long GetMaxRssInKBytes();
+  static long GetCurrentRssInKBytes();
+  long max_memory_usage_, current_memory_usage_;
+};
+
+MemUsage::MemUsage() {
+  max_memory_usage_ = GetMaxRssInKBytes();
+  current_memory_usage_ = GetCurrentRssInKBytes();
+}
+
+long MemUsage::GetMaxMemoryUsageInMb() const {
+  return (GetMaxRssInKBytes() - max_memory_usage_) / 1024L;
+}
+
+long MemUsage::GetCurrentMemoryUsageInMb() const {
+  return (GetCurrentRssInKBytes() - current_memory_usage_) / 1024L;
+}
+
+long MemUsage::GetMaxRssInKBytes() {
+  long rss_value = 0;
+  rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) == 0) {
+    rss_value = usage.ru_maxrss;
+#ifdef __APPLE__
+    rss_value /= 1024L;
+#endif
+  }
+  return rss_value;
+}
+
+long MemUsage::GetCurrentRssInKBytes() {
+#if defined(__linux__)
+  std::ifstream statm("/proc/self/statm");
+  long pages_resident = 0;
+  statm.ignore(1, ' ');
+  statm >> pages_resident;
+
+  long page_size_kb = sysconf(_SC_PAGESIZE) / 1024;
+  return pages_resident * page_size_kb;
+
+#elif defined(__APPLE__)
+  mach_task_basic_info info;
+  mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                (task_info_t)&info, &infoCount) != KERN_SUCCESS)
+    return 0;
+
+  return info.resident_size / 1024;
+
+#else
+  // Платформа не поддерживается
+   return 0;
+#endif
+}
+
+void MemUsage::print(bool up, bool down) const {
+  auto max_m = GetMaxMemoryUsageInMb();
+  auto cur_m = GetCurrentMemoryUsageInMb();
+  if (!up || !down) {
+    if (up) {
+      std::cout << "------\n";
+    }
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+    if (down) {
+       std::cout << "------" << std::endl;
+    }
+  } else {
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+    std::cout << "------\n";
+    std::cout << "| Max: " << max_m << "Mb\t\t";
+    std::cout << "| Current: " << cur_m << "Mb\n";
+  }
+};

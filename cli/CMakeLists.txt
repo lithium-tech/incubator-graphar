@@ -27,6 +27,12 @@ project(
   LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -fopenmp=libgomp")
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../cpp ${CMAKE_BINARY_DIR}/graphar)
 
 # Find the module development requirements (requires FindPython from 3.17 or
@@ -37,6 +43,16 @@ find_package(Arrow REQUIRED)
 find_package(ArrowDataset REQUIRED)
 find_package(ArrowAcero REQUIRED)
 find_package(Parquet REQUIRED)
+set(OpenMP_USE_STATIC_RUNTIME ON)
+find_package(OpenMP REQUIRED)
+
+# Устанавливаем флаги для статической линковки libgomp
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+
+# Принудительно используем статическую версию libgomp
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -lgomp -lpthread")
+
 # Check if ORC is enabled.
 if (NOT ${ARROW_ORC})
     message(WARNING "apache-arrow is built without ORC extension, ORC related functionalities will be disabled.")
@@ -52,6 +68,7 @@ target_link_libraries(_core PRIVATE pybind11::headers graphar Arrow::arrow_share
                                     ArrowDataset::arrow_dataset_shared
                                     ArrowAcero::arrow_acero_shared
                                     )
+target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
 target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/src)
 target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/thirdparty)
