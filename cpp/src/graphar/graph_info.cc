@@ -1031,9 +1031,7 @@ Status EdgeInfo::Save(const std::string& path) const {
   return fs->WriteValueToFile(yaml_content, no_url_path);
 }
 
-namespace {
-
-static std::string PathToDirectory(const std::string& path) {
+std::string PathToDirectory(const std::string& path) {
   if (path.rfind("s3://", 0) == 0) {
     int t = path.find_last_of('?');
     t = (t == std::string::npos) ? path.length() : t;
@@ -1051,6 +1049,8 @@ static std::string PathToDirectory(const std::string& path) {
   }
   return path;
 }
+
+namespace {
 
 static Result<std::shared_ptr<GraphInfo>> ConstructGraphInfo(
     std::shared_ptr<Yaml> graph_meta, const std::string& default_name,

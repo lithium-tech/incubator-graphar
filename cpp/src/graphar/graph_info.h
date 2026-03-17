@@ -897,4 +897,11 @@ class GraphInfo {
   std::unique_ptr<Impl> impl_;
 };
 
+/**
+ * @brief Convert a file path to its directory path
+ * @param path The input file path
+ * @return The directory path ending with '/'
+ */
+std::string PathToDirectory(const std::string& path);
+
 }  // namespace graphar
