@@ -898,9 +898,11 @@ class GraphInfo {
 };
 
 /**
- * @brief Convert a file path to its directory path
- * @param path The input file path
- * @return The directory path ending with '/'
+ * @brief Convert a file path to its directory-like path.
+ * @param path The input file path.
+ * @return The directory portion of the path, which will include a trailing
+ *         '/' before any query string when possible. If no directory
+ *         separator is found, the original path may be returned unchanged.
  */
 std::string PathToDirectory(const std::string& path);
 
