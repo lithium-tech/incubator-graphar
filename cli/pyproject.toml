@@ -18,6 +18,9 @@ test = ["pandas ~= 2.0", "typing_extensions ~= 4.0"]
 [project.scripts]
 graphar = "graphar_cli.graphar_cli:main"
 
+#[tool.scikit-build.cmake]
+#build-type = "Debug"
+
 
 [tool.scikit-build]
 build-dir = "build"
