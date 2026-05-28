@@ -42,6 +42,8 @@
 #include "graphar/fwd.h"
 #include "graphar/general_params.h"
 
+#include <iostream>
+
 namespace graphar::detail {
 template <typename U, typename T>
 static Status CastToLargeOffsetArray(
@@ -254,9 +256,19 @@ Status FileSystem::WriteTableToFile(
     const std::string& path,
     const std::shared_ptr<WriterOptions>& options) const noexcept {
   // try to create the directory, oss filesystem may not support this, ignore
-  ARROW_UNUSED(arrow_fs_->CreateDir(path.substr(0, path.find_last_of("/"))));
+  /*ARROW_UNUSED(arrow_fs_->CreateDir(path.substr(0, path.find_last_of("/"))));
   GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(auto output_stream,
-                                       arrow_fs_->OpenOutputStream(path));
+                                       arrow_fs_->OpenOutputStream(path));*/
+
+  auto dir = path.substr(0, path.find_last_of("/"));
+  auto st = arrow_fs_->CreateDir(dir, true);  // recurvsive
+  if (!st.ok()) {
+    std::cout << "CreateDir failed: " << dir
+              << " error: " << st.ToString() << std::endl;
+  }
+
+  GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(auto output_stream,
+                                     arrow_fs_->OpenOutputStream(path));
   switch (file_type) {
   case FileType::CSV: {
     GAR_RETURN_ON_ARROW_ERROR_AND_ASSIGN(
