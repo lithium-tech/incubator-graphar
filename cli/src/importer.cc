@@ -26,7 +26,6 @@
 #include <unistd.h>
 #include <fstream>
 #include <malloc.h>
-#include <pybind11/pybind11.h>
 
 #include "graphar/api/info.h"
 #include "graphar/high-level/edges_builder.h"
