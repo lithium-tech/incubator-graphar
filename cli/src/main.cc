@@ -17,12 +17,7 @@
  * under the License.
  */
 
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
-
-#include "graphar/filesystem.h"
-#include "graphar/graph_info.h"
-#include "graphar/reader_util.h"
+#include "graphar/api/info.h"
 #include "importer.h"
 #include "merger.h"
 

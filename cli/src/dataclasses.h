@@ -1,5 +1,5 @@
 /*
-* This file contains data structures used to parse configs 
+* This file contains data structures used to parse configs
 * and functions that do parsing.
 */
 
@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
@@ -130,7 +131,7 @@ struct MergeConfig: public AbstractConfig {
     graphar_config.fill(graphar_dict);
     tmp_path = graphar_dict["tmp_path"].cast<std::string>();
 
-    // vertices + edges 
+    // vertices + edges
     auto schema_dict = config_dict["merge_schema"].cast<py::dict>();
     if (schema_dict.contains("vertices")) {
       auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
@@ -141,7 +142,7 @@ struct MergeConfig: public AbstractConfig {
       auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
       fill_data(merge_schema.edges, edges_list);
     }
-  } 
+  }
 };
 
 struct ImportConfig: public AbstractConfig {
@@ -151,12 +152,12 @@ struct ImportConfig: public AbstractConfig {
     auto graphar_dict = config_dict["graphar"].cast<py::dict>();
     graphar_config.fill(graphar_dict);
 
-    // vertices + edges 
+    // vertices + edges
     auto schema_dict = config_dict["import_schema"].cast<py::dict>();
     auto vertices_list = schema_dict["vertices"].cast<std::vector<py::dict>>();
     fill_data(import_schema.vertices, vertices_list);
 
     auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
     fill_data(import_schema.edges, edges_list);
-  } 
+  }
 };

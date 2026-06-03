@@ -61,7 +61,13 @@ else()
 endif()
 # Add a library using FindPython's tooling (pybind11 also provides a helper like
 # this)
-python_add_library(_core MODULE src/main.cc WITH_SOABI)
+python_add_library(_core MODULE
+		   src/main.cc
+		   src/util.cc
+		   src/tools.cc
+		   src/importer.cc
+		   src/merger.cc
+		   WITH_SOABI)
 
 target_link_libraries(_core PRIVATE pybind11::headers graphar Arrow::arrow_shared
                                     Parquet::parquet_shared
