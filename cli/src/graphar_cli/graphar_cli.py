@@ -19,6 +19,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import List
 
+from graphar_cli.checker import check_graphar
+from graphar_cli.gather_statistics import calculate_statistics
+
 import typer
 import yaml
 
@@ -198,6 +201,61 @@ def merge_data(
         logger.info(res)
     except Exception as e:
         logger.error("Merge failed: %s", e)
+        raise typer.Exit(1) from None
+
+
+@app.command(
+    "validate",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Check graph represents given data correctly.",
+    no_args_is_help=True,
+)
+def check_data(
+    config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr check config file"),
+    debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+    light_check: bool = typer.Option(True, "--light", "-l", help="Light check without data comparison"),
+    deep_check: bool = typer.Option(True, "--deep", "-i", help="In-depth check with data comparison")
+):
+    if not Path(config_file).is_file():
+        logger.error("File not found: %s", config_file)
+        raise typer.Exit(1)
+
+    try:
+        with Path(config_file).open(encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        check_config = ImportConfig(**config, debug_mode=debug_mode)
+        #validate(check_config) TODO make custom schema & validator if needed
+    except Exception as e:
+        logger.error("Invalid config: %s", e)
+        raise typer.Exit(1) from None
+    try:
+        logger.info("Starting check")
+        res = check_graphar(check_config.model_dump(), light_check, deep_check)
+        logger.info(res)
+    except Exception as e:
+        logger.error("Check failed: %s", e)
+        raise typer.Exit(1) from None
+        
+
+@app.command(
+    "gather-statistics",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Calculate statistics for any GraphAr graph.",
+    no_args_is_help=True,
+)
+def check_data(
+    config_file: str = typer.Option(None, "--path", "-p", help="Path to the main GraphAr yaml.")
+):
+    if not Path(config_file).is_file():
+        logger.error("File not found: %s", config_file)
+        raise typer.Exit(1)
+
+    try:
+        logger.info("Gathering statistics...")
+        res = calculate_statistics(config_file)
+        logger.info(res)
+    except Exception as e:
+        logger.error("Check failed: %s", e)
         raise typer.Exit(1) from None
 
 
