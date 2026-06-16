@@ -301,6 +301,7 @@ Status FileSystem::WriteTableToFile(
     return Status::Invalid(
         "Unsupported file type: ", FileTypeToString(file_type), " for wrting.");
   }
+  RETURN_NOT_ARROW_OK(output_stream->Close());
   return Status::OK();
 }
 
@@ -319,6 +320,7 @@ Status FileSystem::WriteLabelTableToFile(
   RETURN_NOT_ARROW_OK(parquet::arrow::WriteTable(
       *table, arrow::default_memory_pool(), output_stream, 64 * 1024 * 1024,
       builder.build(), parquet::default_arrow_writer_properties()));
+  RETURN_NOT_ARROW_OK(output_stream->Close());
   return Status::OK();
 }
 

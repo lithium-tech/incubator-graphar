@@ -165,7 +165,10 @@ void ProcessArray(
       }
     }
     //the chunk is ready, save it
-    edge_builder->Dump(chunk);
+    graphar::Status st = edge_builder->Dump(chunk);
+    if(st.IsInvalid()) {
+      throw std::runtime_error("Could not write edge chunk "+std::to_string(chunk) + ": " + st.message());
+    }
 
     #pragma omp atomic
     ++processed_chunks;
@@ -238,7 +241,12 @@ std::string DoImport(const py::dict& config_dict) {
         graphar::CreateVertexInfo(vertex.type, vertex.chunk_size, pgs,
                                   vertex.labels, vertex.prefix, version);
     auto file_name = vertex.type + ".vertex.yaml";
-    vertex_info->Save(save_path / file_name);
+    {
+        graphar::Status st = vertex_info->Save(save_path / file_name);
+        if(st.IsInvalid()) {
+          throw std::runtime_error("Could not write vertex info: " + st.message());
+        }
+    }
     vertices_info.push_back(vertex_info);
     logger("Vertex info saved");
 
@@ -316,13 +324,21 @@ std::string DoImport(const py::dict& config_dict) {
     logger("Vertex table with index created");
 
     for (const auto& property_group : pgs) {
-      vertex_prop_writer->WriteTable(vertex_table_with_index, property_group,
+      graphar::Status st = vertex_prop_writer->WriteTable(vertex_table_with_index, property_group,
                                      start_chunk_index);
+      if(st.IsInvalid()) { 
+        throw std::runtime_error("Could not write vertex property chunks: " + st.message());
+      }
     }
     logger("Wrote "+std::to_string(pgs.size())+" property tables.");
     auto vertex_count = merged_vertex_table->num_rows();
     vertex_counts[vertex.type] = vertex_count;
-    vertex_prop_writer->WriteVerticesNum(vertex_count);
+    {
+      graphar::Status st = vertex_prop_writer->WriteVerticesNum(vertex_count);
+      if(st.IsInvalid()) { 
+          throw std::runtime_error("Could not write number of vertices: " + st.message());
+      }
+    }
     for (auto &label : vertex.labels) {
       vertices_labels.push_back(label);
     }
@@ -377,7 +393,12 @@ std::string DoImport(const py::dict& config_dict) {
     auto file_name =
         ConcatEdgeTriple(edge.src_type, edge.edge_type, edge.dst_type) +
         ".edge.yaml";
-    edge_info->Save(save_path / file_name);
+    {
+        graphar::Status st = edge_info->Save(save_path / file_name);
+        if(st.IsInvalid()) { 
+            throw std::runtime_error("Could not write edge info: " + st.message());
+        }
+    }
     edges_info.push_back(edge_info);
     auto save_path_str = save_path.string();
     save_path_str += "/";
@@ -604,7 +625,12 @@ std::string DoImport(const py::dict& config_dict) {
   auto graph_info = graphar::CreateGraphInfo(import_config.graphar_config.name,
                                               vertices_info, edges_info, vertices_labels, "./", version);
   auto file_name = graph_info->GetName() + ".yaml";
-  graph_info->Save(save_path / file_name);
+  {
+      graphar::Status st = graph_info->Save(save_path / file_name);
+      if(st.IsInvalid()) { 
+        throw std::runtime_error("Could not write graph info: " + st.message());
+      }
+  }
   logger("Save: end");
 
   return "Imported successfully!";

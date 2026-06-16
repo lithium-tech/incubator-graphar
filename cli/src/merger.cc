@@ -647,6 +647,42 @@ void GetVertexChunkSizes(
     }
 }
 
+/**
+ * @brief Constructs a vector of vertex PropertyGroups, filtering out primary key properties.
+ * 
+ * This function iterates through the source vertex's property groups, excludes any 
+ * properties marked as primary keys (is_primary=true), and creates new PropertyGroup 
+ * instances. The generated groups are assigned auto-incremented names following the 
+ * pattern "{vertex_type}_properties_{index}".
+ * 
+ * @param vertex The source MergeVertex structure containing raw property group definitions.
+ * @param start_index The starting index for numbering the generated property groups. 
+ *                    The function increments this value for each processed group.
+ * @return std::vector<std::shared_ptr<graphar::PropertyGroup>> A vector of shared pointers 
+ *         to the newly created GraphAr PropertyGroup objects.
+ */
+std::vector<std::shared_ptr<graphar::PropertyGroup>> BuildVertexPropertyGroupsExcludingPk(const MergeVertex& vertex, 
+                                                                    int start_index) {
+    std::vector<std::shared_ptr<graphar::PropertyGroup>> pgs;
+    for (const auto& pg : vertex.property_groups) {
+        ++start_index;
+        std::vector<graphar::Property> props;
+        for (const auto& prop : pg.properties) {
+            if(prop.is_primary) {
+                continue;
+            }
+            props.emplace_back(prop.name, graphar::DataType::TypeNameToDataType(prop.data_type), 
+                    prop.is_primary, prop.nullable);
+        }
+        auto property_group = graphar::CreatePropertyGroup(
+            props, graphar::StringToFileType(pg.file_type), 
+            vertex.type+"_properties_"+std::to_string(start_index));
+        pgs.emplace_back(property_group);
+    }
+    return pgs;
+}
+
+
 void AddPgsFromVertexInfo(std::vector<std::shared_ptr<graphar::PropertyGroup>>& pgs,
                           const MergeVertex& vertex_merge) {
 
@@ -654,7 +690,6 @@ void AddPgsFromVertexInfo(std::vector<std::shared_ptr<graphar::PropertyGroup>>& 
     int number_of_pgroups = pgs.size();
 
     for (const auto& pg : vertex_merge.property_groups) {
-        ++number_of_pgroups;
         std::vector<graphar::Property> props;
         for (const auto& prop : pg.properties) {
             if (prop.is_primary) {
@@ -663,18 +698,11 @@ void AddPgsFromVertexInfo(std::vector<std::shared_ptr<graphar::PropertyGroup>>& 
                                             vertex_merge.type);
                 }
                 primary_key = prop.name;
-            } else {
-                graphar::Property property(
-                    prop.name, graphar::DataType::TypeNameToDataType(prop.data_type),
-                    prop.is_primary, prop.nullable);
-                props.push_back(property);
             }
         }
-        auto property_group = graphar::CreatePropertyGroup(
-            props, graphar::StringToFileType(pg.file_type), 
-            vertex_merge.type+"_properties_"+std::to_string(number_of_pgroups));
-        pgs.emplace_back(property_group);
     }
+    auto AddedPgs = BuildVertexPropertyGroupsExcludingPk(vertex_merge, number_of_pgroups);
+    pgs.insert(pgs.end(), AddedPgs.begin(), AddedPgs.end());
     logger("    Additional PG added to config.");
 }
 
@@ -866,8 +894,12 @@ void MergeVertexChunkwise(std::shared_ptr<arrow::Table> vertex_table,
 
         // Write table
         for (const auto& property_group : pgs) {
-            vertex_prop_writer->WriteTable(sorted_chunk, property_group,
+            graphar::Status st = vertex_prop_writer->WriteTable(sorted_chunk, property_group,
                                             vertex_chunk_idx.value());
+
+            if(st.IsInvalid()) { 
+                throw std::runtime_error("Could not write vertex property chunk: " + st.message());
+            }
         }
     }
 }
@@ -910,7 +942,13 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
 
         auto file_name = vertex.type + ".vertex.yaml";
         auto save_path = merge_config.graphar_config.path;
-        auto res = vertex_info_updated->Save(save_path + file_name);
+        {
+            graphar::Status st = vertex_info_updated->Save(save_path + file_name);
+            if(st.IsInvalid()) {
+                throw std::runtime_error("Could not write vertex info: " + st.message());
+            }
+        }
+        
         logger("    Saved updated vertex description.");
 
         // Create vertex property writer to save new data
@@ -940,7 +978,9 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
         MapPK2row(pk_column, pk2row_num);
 
         // 1.3.5 For each chunk in GraphAr collect rows in additional data that match it
-        MergeVertexChunkwise(merged_vertex_table, pgs, vertex_prop_writer, pk2row_num, vertex.join_on, path_original, num_threads);
+
+        MergeVertexChunkwise(merged_vertex_table, BuildVertexPropertyGroupsExcludingPk(vertex, vertex_info->GetPropertyGroups().size()), 
+                             vertex_prop_writer, pk2row_num, vertex.join_on, path_original, num_threads);
         logger("  Processed vertex <"+vertex.type+">.");
     }
 }
