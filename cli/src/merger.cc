@@ -849,7 +849,7 @@ std::shared_ptr<arrow::Table> MakeMergedVertexTable(const MergeVertex& vertex,
     }
             
     // Merge all tables with new data into a big one
-    return MergeTables(vertex_tables);
+    return MergeTables(vertex_tables)->CombineChunks().ValueOrDie();
 }
 
 
@@ -943,7 +943,7 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
         auto file_name = vertex.type + ".vertex.yaml";
         auto save_path = merge_config.graphar_config.path;
         {
-            graphar::Status st = vertex_info_updated->Save(save_path + file_name);
+            graphar::Status st = vertex_info_updated->Save(save_path + '/' + file_name);
             if(st.IsInvalid()) {
                 throw std::runtime_error("Could not write vertex info: " + st.message());
             }
@@ -1399,7 +1399,7 @@ void MergeEdges(MergeConfig& merge_config,
             std::unordered_map<
                 std::string,
                 std::pair<std::string, std::shared_ptr<arrow::DataType>>>
-                columns_to_change = CollectColumnsToChange(source_PG.columns, edge.property_groups, pg_data_table);
+                columns_to_change = CollectColumnsToChange(source_PG.columns, std::vector<PropertyGroup>{pg}, pg_data_table);
             pg_data_table = ChangeNameAndDataType(pg_data_table, columns_to_change);
             logger("    Name & data type changed, columns to change: "+std::to_string(columns_to_change.size()));
             pg_data_table = pg_data_table->CombineChunks().ValueOrDie();
