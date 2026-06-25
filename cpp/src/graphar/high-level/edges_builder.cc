@@ -28,59 +28,7 @@
 
 namespace graphar::builder {
 
-Status EdgesBuilder::Dump() {
-  // construct the writer
-  EdgeChunkWriter writer(edge_info_, prefix_, adj_list_type_, writer_options_,
-                         validate_level_);
-  // construct empty edge collections for vertex chunks without edges
-  IdType num_vertex_chunks =
-      (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
-  if (edges_.size() < num_vertex_chunks) {
-    edges_.resize(num_vertex_chunks);
-  }
-  // dump the offsets
-  if (adj_list_type_ == AdjListType::ordered_by_source ||
-      adj_list_type_ == AdjListType::ordered_by_dest) {
-    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
-         vertex_chunk_index++) {
-      // sort the edges
-      if (adj_list_type_ == AdjListType::ordered_by_source)
-        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_src);
-      if (adj_list_type_ == AdjListType::ordered_by_dest)
-        sort(edges_[vertex_chunk_index].begin(), edges_[vertex_chunk_index].end(), cmp_dst);
-      // construct and write offset chunk
-      GAR_ASSIGN_OR_RAISE(
-          auto offset_table,
-          getOffsetTable(vertex_chunk_index, edges_[vertex_chunk_index]));
-      GAR_RETURN_NOT_OK(
-          writer.WriteOffsetChunk(offset_table, vertex_chunk_index));
-    }
-  }
-  // dump the vertex num
-  GAR_RETURN_NOT_OK(writer.WriteVerticesNum(num_vertices_));
-  // dump the edge nums
-  IdType vertex_chunk_num =  //[My] duplicate of num_vertex_chunks? ok...
-      (num_vertices_ + vertex_chunk_size_ - 1) / vertex_chunk_size_;
-  for (IdType vertex_chunk_index = 0; vertex_chunk_index < vertex_chunk_num;
-       vertex_chunk_index++) {
-    GAR_RETURN_NOT_OK(writer.WriteEdgesNum(
-        vertex_chunk_index, edges_[vertex_chunk_index].size()));
-    }
-    // dump the edges
-    for (IdType vertex_chunk_index = 0; vertex_chunk_index < num_vertex_chunks;
-         vertex_chunk_index++) {
-    // convert to table
-    GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[vertex_chunk_index]));
-    // write table
-    GAR_RETURN_NOT_OK(writer.WriteTable(input_table, vertex_chunk_index, 0));
-    edges_[vertex_chunk_index].clear();
-  }
-  is_saved_ = true;
-  return Status::OK();
-}
-
-Status EdgesBuilder::Dump(int chunk) {
-  // construct the writer
+Status EdgesBuilder::Dump(int chunk, const std::shared_ptr<arrow::Table>& table) {
   EdgeChunkWriter writer = *EdgeChunkWriter::Make(edge_info_, prefix_, adj_list_type_, validate_level_).value();
 
   // dump the offsets
@@ -109,10 +57,9 @@ Status EdgesBuilder::Dump(int chunk) {
 
   // dump the edges
   // convert to table
-  GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[chunk])); //property issues
+  GAR_ASSIGN_OR_RAISE(auto input_table, convertToTable(edges_[chunk], table));
   // write table
   GAR_RETURN_NOT_OK(writer.WriteTable(input_table, chunk, 0)); 
-  edges_[chunk].clear();
   std::vector<Edge>().swap(edges_[chunk]);
 
   return Status::OK();
@@ -143,7 +90,16 @@ Status EdgesBuilder::validate(const Edge& e,
 
   // strong validate
   if (validate_level == ValidateLevel::strong_validate) {
-    for (auto& property : e.GetProperties()) {
+    for (const std::string& property : column_names_) {
+      // check if the property is contained
+      if (!edge_info_->HasProperty(property)) {
+        return Status::KeyError("Property with name ", property,
+                                " is not contained in the ",
+                                edge_info_->GetEdgeType(), " edge info.");
+      }
+    }
+    // Previous version had alternative validation logic for this level
+    /*for (auto& property : e.GetProperties()) {
 
       const std::string* str_property = GetColumnName(property.first);
       if (!str_property) {
@@ -217,12 +173,12 @@ Status EdgesBuilder::validate(const Edge& e,
             "Invalid data type for property ", *str_property + ", defined as ",
             type->ToTypeName(), ", but got ", property.second.type().name());
       }
-    }
+    }*/
   }
   return Status::OK();
 }
 
-template <Type type>
+/*template <Type type>
 Status EdgesBuilder::tryToAppend(
     const std::string& property_name,
     std::shared_ptr<arrow::Array>& array,  // NOLINT
@@ -308,7 +264,7 @@ Status EdgesBuilder::appendToArray(
     return Status::TypeError("Unsupported property type.");
   }
   return Status::OK();
-}
+}*/
 
 Status EdgesBuilder::tryToAppend(
     int src_or_dest,
@@ -325,36 +281,58 @@ Status EdgesBuilder::tryToAppend(
 }
 
 Result<std::shared_ptr<arrow::Table>> EdgesBuilder::convertToTable(
-    const std::vector<Edge>& edges) {
+    const std::vector<Edge>& edges, const std::shared_ptr<arrow::Table>& table) {
+
   const auto& property_groups = edge_info_->GetPropertyGroups();
-  std::vector<std::shared_ptr<arrow::Array>> arrays;
+  std::vector<std::shared_ptr<arrow::ChunkedArray>> arrays;
   std::vector<std::shared_ptr<arrow::Field>> schema_vector;
+
   // add src
   std::shared_ptr<arrow::Array> array;
   schema_vector.push_back(arrow::field(
       GeneralParams::kSrcIndexCol, DataType::DataTypeToArrowDataType(int64())));
   GAR_RETURN_NOT_OK(tryToAppend(1, array, edges));
-  arrays.push_back(array);
+  arrays.push_back(std::make_shared<arrow::ChunkedArray>(array));
+
   // add dst
   schema_vector.push_back(arrow::field(
       GeneralParams::kDstIndexCol, DataType::DataTypeToArrowDataType(int64())));
   GAR_RETURN_NOT_OK(tryToAppend(0, array, edges));
-  arrays.push_back(array);
-  // add properties
+  arrays.push_back(std::make_shared<arrow::ChunkedArray>(array));
+
+  // create builder to add properties
+  arrow::Int64Builder builder;
+  for(auto& i : edges) {
+    builder.Append(i.GetRow());
+  }
+  std::shared_ptr<arrow::Array> index_order;
+  builder.Finish(&index_order);
+
+  // collect column names
+  std::vector<int> column_indices;
   for (auto& property_group : property_groups) {
     for (auto& property : property_group->GetProperties()) {
       // add a column to schema
       schema_vector.push_back(arrow::field(
           property.name, DataType::DataTypeToArrowDataType(property.type)));
-      // add a column to data
-      // data here is ok
-      std::shared_ptr<arrow::Array> array;
-      GAR_RETURN_NOT_OK(
-          appendToArray(property.type, property.name, array, edges));
-      int64_t null_count = array->null_count();
-      arrays.push_back(array);
+      int column_id = table->schema()->GetFieldIndex(property.name);
+      if(column_id == -1) {
+        throw std::runtime_error("[ERROR] Column '" + property.name + "' not found in input table.");
+      }
+      column_indices.push_back(column_id);
     }
   }
+
+  // filter all columns except for the primary ones
+  auto table_filtered = table->SelectColumns(column_indices).ValueOrDie();
+  arrow::compute::TakeOptions options = arrow::compute::TakeOptions::NoBoundsCheck();
+  std::shared_ptr<arrow::Table> sorted_chunk = arrow::compute::Take(table_filtered, index_order, options).ValueOrDie().table();
+
+  // add gathered columns
+  for (int i = 0; i < sorted_chunk->num_columns(); ++i) {
+      arrays.push_back(sorted_chunk->column(i));
+  }
+
   auto schema = std::make_shared<arrow::Schema>(schema_vector);
   return arrow::Table::Make(schema, arrays);
 }

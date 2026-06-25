@@ -705,7 +705,6 @@ def deep_checker(config: dict[str, Any]) -> str:
                 for pg in edge_info_graphar["property_groups"]:
                     path_to_pg = graph_path + "/edge/" + edge_full_name + "/ordered_by_"+("source/" if adj_list["aligned_by"] == "src" else "dest/") +\
                                  pg["prefix"] + f"part{edge_chunk}/"
-
                     all_chunk_names = sorted(get_all_files(path_to_pg))
                     chunk_files = []
                     for chunk_file in all_chunk_names:

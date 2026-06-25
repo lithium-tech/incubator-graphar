@@ -49,138 +49,38 @@ namespace graphar::builder {
  *
  */
 class Edge {
- private:
-  IdType src_id_, dst_id_;
-  bool empty_;
-  mutable bool sorted_ = true;  // since we store everything in vector, we should sort it before using binary search
-  mutable std::vector<std::pair<std::string_view, std::any>> properties_;
+private:
+    IdType src_ = -1;
+    IdType dst_ = -1;
+    IdType row_ = -1;
 
-  /**
-   * @brief sortrs internal vector of properties
-   */
-  void sort_vector_() const
-  {
-    std::sort(properties_.begin(), properties_.end(), [](const auto &a, const auto& b){
-      return a.first < b.first;
-    });
+public:
+  Edge(IdType src, IdType dst, IdType row = -1)
+      : src_{src}, dst_{dst}, row_{row} {}
+
+  bool operator<(const Edge& other) const {
+      return src_ == other.src_ ? dst_ < other.dst_ : src_ < other.src_;
   }
 
-  const std::any* get_property_(const std::string& name) const
-  {
-    auto it = std::find_if(properties_.begin(), properties_.end(),
-                       [&name](const auto& p) { return p.first == name; });
-    if (it == properties_.end())
-      return nullptr;
-    return &(it->second);
+  bool operator==(const Edge& other) const {
+      return src_ == other.src_ && dst_ == other.dst_ && row_ == other.row_;
   }
 
- public:
-  /**
-   * @brief Initialize the edge with its source and destination.
-   *
-   * @param src_id The id of the source vertex.
-   * @param dst_id The id of the destination vertex.
-   */
-  explicit Edge(IdType src_id, IdType dst_id)
-      : src_id_(src_id), dst_id_(dst_id), empty_(true) {}
-
-  /**
-   * @brief Check if the edge is empty.
-   *
-   * @return true/false.
-   */
-  inline bool Empty() const noexcept { return empty_; }
+  inline IdType GetRow() const noexcept { return row_; }
 
   /**
    * @brief Get source id of the edge.
    *S
    * @return The id of the source vertex.
    */
-  inline IdType GetSource() const noexcept { return src_id_; }
+  inline IdType GetSource() const noexcept { return src_; }
 
   /**
    * @brief Get destination id of the edge.
    *
    * @return The id of the destination vertex.
    */
-  inline IdType GetDestination() const noexcept { return dst_id_; }
-
-  /**
-   * @brief Add a property to the edge.
-   *
-   * @param name The name of the property.
-   * @param val The value of the property.
-   */
-  // TODO(@acezen): Enable the property to be a vector(list).
-  inline void AddProperty(std::string_view name, const std::any& val) {
-    empty_ = false;
-    properties_.emplace_back(name, val);
-    sorted_ = false;
-  }
-
-  /**
-   * @brief Reserve properties_
-   * 
-   * @param size The size of properties_.
-   */
-  void Reserve(size_t size)
-  {
-    properties_.reserve(size);
-  }
-
-  /**
-   * @brief Get a property of the edge.
-   *
-   * @param property The name of the property.
-   * @return The value of the property.
-   */
-  inline const std::any& GetProperty(const std::string& property) const {
-    const std::any* ptr = get_property_(property);
-    if (!ptr)
-      throw std::runtime_error("Key not found");
-    return *ptr;
-  }
-
-  /**
-   * @brief Get all properties of the edge.
-   *
-   * @return The vector containing all properties of the edge.
-   */
-  inline const std::vector<std::pair<std::string_view, std::any>>& GetProperties()
-      const {
-    return properties_;
-  }
-
-  /**
-   * @brief Check if the edge contains a property.
-   *
-   * @param property The name of the property.
-   * @return true/false.
-   */
-  inline bool ContainProperty(const std::string& property) const {
-    return get_property_(property) != nullptr;
-  }
-
-  /**
-   * @brief Edge's move constructor.
-   */
-  Edge(Edge&& other) noexcept
-    : src_id_(other.src_id_), dst_id_(other.dst_id_), empty_(other.empty_)
-  {
-    properties_ = std::move(other.properties_);
-  }
-
-  /**
-   * @brief Move asigment operator.
-   */
-  Edge& operator=(Edge&& other) noexcept
-  {
-    properties_ = std::move(other.properties_);
-    src_id_ = other.src_id_;
-    dst_id_ = other.dst_id_;
-    empty_ = other.empty_;
-    return *this;
-  }
+  inline IdType GetDestination() const noexcept { return dst_; }
 
   /**
    * @brief Copy constructor.
@@ -352,13 +252,13 @@ class EdgesBuilder {
                                     ValidateLevel::default_validate) {
     // validate
     GAR_RETURN_NOT_OK(validate(e, validate_level));
+
     // add an edge
     IdType vertex_chunk_index = getVertexChunkIndex(e);
     if (vertex_chunk_index >= edges_.size()) {
       edges_.resize(vertex_chunk_index + 1);
     }
-    edges_[vertex_chunk_index].emplace_back(e); //std::move  ??? 
-    //num_edges_++;
+    edges_[vertex_chunk_index].emplace_back(e);
     graph_changed_ = true;
     return Status::OK();
   }
@@ -396,8 +296,7 @@ class EdgesBuilder {
    *
    * @return Status: ok or error.
    */
-  Status Dump();
-  Status Dump(int chunk);
+  Status Dump(int chunk, const std::shared_ptr<arrow::Table>& table);
 
   /**
    * @brief Construct an EdgesBuilder from edge info.
@@ -551,10 +450,10 @@ class EdgesBuilder {
    * @param edges The edges of a specific vertex chunk.
    * @return Status: ok or Status::TypeError error.
    */
-  Status appendToArray(const std::shared_ptr<DataType>& type,
+  /*Status appendToArray(const std::shared_ptr<DataType>& type,
                        const std::string& property_name,
                        std::shared_ptr<arrow::Array>& array,  // NOLINT
-                       const std::vector<Edge>& edges);
+                       const std::vector<Edge>& edges);*/
 
   /**
    * @brief Append the values for a property for edges in a specific vertex
@@ -566,10 +465,10 @@ class EdgesBuilder {
    * @param edges The edges of a specific vertex chunk.
    * @return Status: ok or Status::ArrowError error.
    */
-  template <Type type>
+  /*template <Type type>
   Status tryToAppend(const std::string& property_name,
                      std::shared_ptr<arrow::Array>& array,  // NOLINT
-                     const std::vector<Edge>& edges);
+                     const std::vector<Edge>& edges);*/
 
   /**
    * @brief Append the adj list for edges in a specific vertex chunk
@@ -591,7 +490,7 @@ class EdgesBuilder {
    * @param edges The edges of a specific vertex chunk.
    */
   Result<std::shared_ptr<arrow::Table>> convertToTable(
-      const std::vector<Edge>& edges);
+      const std::vector<Edge>& edges, const std::shared_ptr<arrow::Table>& table);
 
   /**
    * @brief Construct the offset table if the adj list type is ordered.
@@ -625,13 +524,11 @@ class EdgesBuilder {
 
     bool operator()(std::string_view a, const std::string& b) const noexcept
     {
-      std::cout << "Comparing view, string\n";
       return a < b;
     }
 
     bool operator()(const std::string& a, std::string_view b) const noexcept
     {
-      std::cout << "Comparing string, view\n";
       return a < b;
     }
   };

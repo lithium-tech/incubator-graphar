@@ -676,7 +676,7 @@ std::vector<std::shared_ptr<graphar::PropertyGroup>> BuildVertexPropertyGroupsEx
         }
         auto property_group = graphar::CreatePropertyGroup(
             props, graphar::StringToFileType(pg.file_type), 
-            vertex.type+"_properties_"+std::to_string(start_index));
+            vertex.type+"_properties_"+std::to_string(start_index)+"/");
         pgs.emplace_back(property_group);
     }
     return pgs;
@@ -827,7 +827,15 @@ std::unordered_map<std::string,
             }
         }
 
-        if (column != prop.name || arrow_column->type()->id() != arrow_data_type->id()) {
+        if (column != prop.name || 
+            arrow_column->type()->id() != arrow_data_type->id()  ||
+              arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
+              std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
+              std::static_pointer_cast<arrow::TimestampType>(
+                  graphar::DataType::DataTypeToArrowDataType(
+                      graphar::DataType::TypeNameToDataType("timestamp")
+                  )
+              )->unit()) {
             columns_to_change[column] = std::make_pair(prop.name, arrow_data_type);
         }
     }
@@ -1081,7 +1089,7 @@ std::shared_ptr<graphar::EdgeInfo> CreateUpdatedEdgeInfo(const std::shared_ptr<g
         }
         auto property_group = graphar::CreatePropertyGroup(
             props, graphar::StringToFileType(pg.file_type), 
-            edge.edge_type+"_properties_"+std::to_string(number_of_pgroups));
+            edge.edge_type+"_properties_"+std::to_string(number_of_pgroups)+"/");
         pgs.emplace_back(property_group);
     }
 

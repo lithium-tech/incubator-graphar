@@ -81,7 +81,7 @@ void ProcessArray(
            std::unordered_map<int64_t, graphar::IdType>>& vertex_prop_index_map,
     std::shared_ptr<graphar::builder::EdgesBuilder> edge_builder,
     const std::vector<std::string>& edge_column_names,
-    const Edge& edge, int num_threads, int num_of_chunks)
+    const Edge& edge, graphar::AdjListType adj_list_type, int num_threads, int num_of_chunks)
 {
   auto src_column =
       combined_edge_table->GetColumnByName(edge.src_edge_prop);
@@ -96,6 +96,7 @@ void ProcessArray(
   #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
   for(int chunk = 0; chunk < num_of_chunks; ++chunk)
   {
+    // Iterate over edges of chunk, calculate src & dst IDs and save data origins 
     for(int thread_output = 0; thread_output < num_threads; ++thread_output)
     {
       for(auto i : edge_to_chunk_mapping[thread_output][chunk])
@@ -141,31 +142,17 @@ void ProcessArray(
 
         graphar::builder::Edge e(
           val_src->second,   //src id
-          val_dst->second    //dst id
+          val_dst->second,   //dst id
+          i                  // row number
         );
 
-        //reserve space for its' properties
-        e.Reserve(edge_column_names.size()-2);
-
-        //find properties and add them
-        for (const auto& column_name : edge_column_names) {
-          if (column_name != edge.src_edge_prop && column_name != edge.dst_edge_prop) {
-            auto column = combined_edge_table->GetColumnByName(column_name);
-            auto column_type = column->type();
-            std::any value;
-            TryToCastToAny(
-                graphar::DataType::ArrowDataTypeToDataType(column_type),
-                column->chunk(0), value, i);
-            if (value.has_value()) {
-              e.AddProperty(edge_builder->GetColumnName(column_name), value);
-            }
-          }
-        }
+        // add edge to chunk
         edge_builder->AddEdge(e);
       }
     }
+
     //the chunk is ready, save it
-    graphar::Status st = edge_builder->Dump(chunk);
+    graphar::Status st = edge_builder->Dump(chunk, combined_edge_table);
     if(st.IsInvalid()) {
       throw std::runtime_error("Could not write edge chunk "+std::to_string(chunk) + ": " + st.message());
     }
@@ -286,7 +273,7 @@ std::string DoImport(const py::dict& config_dict) {
           column_prop_map[reversed_columns_config[prop.name]] = prop;
         }
       }
-      std::cout << "Size of column_prop_map: " << column_prop_map.size() << std::endl;
+
       std::unordered_map<
           std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
           columns_to_change;
@@ -304,7 +291,14 @@ std::string DoImport(const py::dict& config_dict) {
           }
         }
         if (column != prop.name ||
-            arrow_column->type()->id() != arrow_data_type->id()) {
+            arrow_column->type()->id() != arrow_data_type->id() ||
+              arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
+              std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
+              std::static_pointer_cast<arrow::TimestampType>(
+                  graphar::DataType::DataTypeToArrowDataType(
+                      graphar::DataType::TypeNameToDataType("timestamp")
+                  )
+              )->unit()) {
           columns_to_change[column] =
               std::make_pair(prop.name, arrow_data_type);
         }
@@ -484,7 +478,14 @@ std::string DoImport(const py::dict& config_dict) {
             }
           }
           if (column != prop.name ||
-              arrow_column->type()->id() != arrow_data_type->id()) {
+              arrow_column->type()->id() != arrow_data_type->id() ||
+              arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
+              std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
+              std::static_pointer_cast<arrow::TimestampType>(
+                  graphar::DataType::DataTypeToArrowDataType(
+                      graphar::DataType::TypeNameToDataType("timestamp")
+                  )
+              )->unit()) {  
             columns_to_change[column] =
                 std::make_pair(prop.name, arrow_data_type);
           }
@@ -602,19 +603,19 @@ std::string DoImport(const py::dict& config_dict) {
       logger("Edge building: start");
       if (src_prop_type == arrow::Type::INT64 && dst_prop_type == arrow::Type::INT64)
           ProcessArray<arrow::Int64Array, arrow::Int64Array>(combined_edge_table, edge_to_chunk_mapping,
-              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, adj_list->GetType(), num_threads, num_of_chunks
           );
       else if (src_prop_type == arrow::Type::INT64 && dst_prop_type == arrow::Type::INT32)
           ProcessArray<arrow::Int64Array, arrow::Int32Array>(combined_edge_table, edge_to_chunk_mapping,
-              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, adj_list->GetType(), num_threads, num_of_chunks
           );
       else if (src_prop_type == arrow::Type::INT32 && dst_prop_type == arrow::Type::INT64)
           ProcessArray<arrow::Int32Array, arrow::Int64Array>(combined_edge_table, edge_to_chunk_mapping,
-              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, adj_list->GetType(), num_threads, num_of_chunks
           );
       else if (src_prop_type == arrow::Type::INT32 && dst_prop_type == arrow::Type::INT32)
           ProcessArray<arrow::Int32Array, arrow::Int32Array>(combined_edge_table, edge_to_chunk_mapping,
-              vertex_prop_index_map, edge_builder, edge_column_names, edge, num_threads, num_of_chunks
+              vertex_prop_index_map, edge_builder, edge_column_names, edge, adj_list->GetType(), num_threads, num_of_chunks
           );
       else
           throw std::runtime_error("Unsupported type combination");
