@@ -40,6 +40,9 @@ enum class Type {
   /** Boolean */
   BOOL = 0,
 
+  /** Signed 16-bit integer */
+  INT16,
+
   /** Signed 32-bit integer */
   INT32,
 

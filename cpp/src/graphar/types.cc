@@ -33,6 +33,8 @@ std::shared_ptr<arrow::DataType> DataType::DataTypeToArrowDataType(
   switch (type->id()) {
   case Type::BOOL:
     return arrow::boolean();
+  case Type::INT16:
+    return arrow::int16();
   case Type::INT32:
     return arrow::int32();
   case Type::INT64:
@@ -61,6 +63,8 @@ std::shared_ptr<DataType> DataType::ArrowDataTypeToDataType(
   switch (type->id()) {
   case arrow::Type::BOOL:
     return boolean();
+  case arrow::Type::INT16:
+    return int16();
   case arrow::Type::INT32:
     return int32();
   case arrow::Type::INT64:
@@ -98,6 +102,7 @@ std::string DataType::ToTypeName() const {
   }
 
     TO_STRING_CASE(BOOL)
+    TO_STRING_CASE(INT16)
     TO_STRING_CASE(INT32)
     TO_STRING_CASE(INT64)
     TO_STRING_CASE(FLOAT)
@@ -119,6 +124,8 @@ std::string DataType::ToTypeName() const {
 std::shared_ptr<DataType> DataType::TypeNameToDataType(const std::string& str) {
   if (str == "bool") {
     return boolean();
+  } else if (str == "int16") {
+    return int16();
   } else if (str == "int32") {
     return int32();
   } else if (str == "int64") {
@@ -156,6 +163,7 @@ std::shared_ptr<DataType> DataType::TypeNameToDataType(const std::string& str) {
   }
 
 TYPE_FACTORY(boolean, Type::BOOL)
+TYPE_FACTORY(int16, Type::INT16)
 TYPE_FACTORY(int32, Type::INT32)
 TYPE_FACTORY(int64, Type::INT64)
 TYPE_FACTORY(float32, Type::FLOAT)

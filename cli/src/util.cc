@@ -729,7 +729,7 @@ TableToUnorderedMapInt64(const std::shared_ptr<arrow::Table>& table,
         break;
 
     default:
-        throw std::runtime_error("Unsupported key type");
+        throw std::runtime_error("Unsupported key type: only int32/int64 are allowed");
   }
   return result;
 }

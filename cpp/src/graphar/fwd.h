@@ -190,6 +190,8 @@ std::shared_ptr<GraphInfo> CreateGraphInfo(
 
 /// @brief Return a boolean DataType instance
 const std::shared_ptr<DataType>& boolean();
+/// @brief Return a int16 DataType instance
+const std::shared_ptr<DataType>& int16();
 /// @brief Return a int32 DataType instance
 const std::shared_ptr<DataType>& int32();
 /// @brief Return a int64 DataType instance
