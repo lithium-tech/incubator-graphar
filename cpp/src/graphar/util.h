@@ -264,12 +264,21 @@ static inline arrow::Status OpenParquetArrowReader(
     std::unique_ptr<parquet::arrow::FileReader>* parquet_reader) {
   std::shared_ptr<arrow::io::RandomAccessFile> input;
   ARROW_ASSIGN_OR_RAISE(input, arrow::io::ReadableFile::Open(file_path));
+
+  auto arrow_reader_props = parquet::ArrowReaderProperties();
+  arrow_reader_props.set_list_type(::arrow::Type::LARGE_LIST);
+
+  parquet::arrow::FileReaderBuilder reader_builder;
+  ARROW_RETURN_NOT_OK(reader_builder.Open(input));
+  reader_builder.memory_pool(pool);
+  reader_builder.properties(arrow_reader_props);
+
 #if defined(ARROW_VERSION) && ARROW_VERSION <= 20000000
-  ARROW_RETURN_NOT_OK(parquet::arrow::OpenFile(input, pool, parquet_reader));
+    ARROW_RETURN_NOT_OK(reader_builder.Build(parquet_reader));
 #else
-  ARROW_ASSIGN_OR_RAISE(auto reader, parquet::arrow::OpenFile(input, pool));
-  *parquet_reader = std::move(reader);
+    ARROW_ASSIGN_OR_RAISE(*parquet_reader, reader_builder.Build());
 #endif
+
   return arrow::Status::OK();
 }
 

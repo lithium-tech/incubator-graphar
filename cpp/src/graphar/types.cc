@@ -50,7 +50,7 @@ std::shared_ptr<arrow::DataType> DataType::DataTypeToArrowDataType(
   case Type::TIMESTAMP:
     return arrow::timestamp(arrow::TimeUnit::MILLI);
   case Type::LIST:
-    return arrow::list(DataTypeToArrowDataType(type->child_));
+    return arrow::large_list(DataTypeToArrowDataType(type->child_));
   default:
     std::string msg = "The data type " + type->ToTypeName() +
                       " is not supported yet in GraphAr";
@@ -84,6 +84,7 @@ std::shared_ptr<DataType> DataType::ArrowDataTypeToDataType(
                              // milliseconds
     return timestamp();
   case arrow::Type::LIST:
+  case arrow::Type::LARGE_LIST:
     return list(ArrowDataTypeToDataType(type->field(0)->type()));
   default:
     std::string msg = "The arrow data type " + type->name() +
@@ -140,6 +141,8 @@ std::shared_ptr<DataType> DataType::TypeNameToDataType(const std::string& str) {
     return date();
   } else if (str == "timestamp") {
     return timestamp();
+  } else if (str == "list<int16>") {
+    return list(int16());
   } else if (str == "list<int32>") {
     return list(int32());
   } else if (str == "list<int64>") {

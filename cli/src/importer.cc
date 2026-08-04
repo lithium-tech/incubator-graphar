@@ -168,6 +168,7 @@ void ProcessArray(
 
 std::string DoImport(const py::dict& config_dict) {
   logger("Start of import");
+  size_t num_threads =  omp_get_max_threads() / 2;
 
   ImportConfig import_config;
   import_config.fill(config_dict);
@@ -239,8 +240,9 @@ std::string DoImport(const py::dict& config_dict) {
 
     auto save_path_str = save_path.string();
     save_path_str += "/";
+    auto options = graphar::WriterOptions::ParquetOptionBuilder().store_schema(true).build();
     auto vertex_prop_writer = graphar::VertexPropertyWriter::Make(
-                                  vertex_info, save_path_str,
+                                  vertex_info, save_path_str, options,
                                   StringToValidateLevel(vertex.validate_level))
                                   .value();
 
@@ -255,6 +257,8 @@ std::string DoImport(const py::dict& config_dict) {
       std::shared_ptr<arrow::Table> table;
       {
         std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
         for (int i = 0; i < source.path.size(); ++i) {
           file_tables[i] = GetDataFromFile(source.path[i], column_names, source.delimiter,
                             source.file_type);
@@ -426,6 +430,8 @@ std::string DoImport(const py::dict& config_dict) {
         std::shared_ptr<arrow::Table> table;
         {
           std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+          #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
           for (int i = 0; i < source.path.size(); ++i) {
             file_tables[i] = GetDataFromFile(source.path[i], column_names,
                                              source.delimiter, source.file_type);
@@ -522,7 +528,6 @@ std::string DoImport(const py::dict& config_dict) {
       const int64_t num_rows = combined_edge_table->num_rows();
 
       //(multi-thread) mapping row to its bucket
-      int num_threads =  omp_get_max_threads() / 2;
       std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
 
       //calculating num of chunks

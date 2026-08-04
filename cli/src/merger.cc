@@ -690,7 +690,6 @@ void AddPgsFromVertexInfo(std::vector<std::shared_ptr<graphar::PropertyGroup>>& 
     int number_of_pgroups = pgs.size();
 
     for (const auto& pg : vertex_merge.property_groups) {
-        std::vector<graphar::Property> props;
         for (const auto& prop : pg.properties) {
             if (prop.is_primary) {
                 if (!primary_key.empty()) {
@@ -963,6 +962,7 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
         save_path += "/";
         auto vertex_prop_writer = graphar::VertexPropertyWriter::Make(
                                     vertex_info_updated, save_path,
+                                    graphar::WriterOptions::ParquetOptionBuilder().store_schema(true).build(), 
                                     StringToValidateLevel(vertex.validate_level))
                                     .value();
 
@@ -987,7 +987,7 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
 
         // 1.3.5 For each chunk in GraphAr collect rows in additional data that match it
 
-        MergeVertexChunkwise(merged_vertex_table, BuildVertexPropertyGroupsExcludingPk(vertex, vertex_info->GetPropertyGroups().size()), 
+        MergeVertexChunkwise(merged_vertex_table, BuildVertexPropertyGroupsExcludingPk(vertex, vertex_info->GetPropertyGroups().size()),
                              vertex_prop_writer, pk2row_num, vertex.join_on, path_original, num_threads);
         logger("  Processed vertex <"+vertex.type+">.");
     }
@@ -1435,7 +1435,7 @@ void MergeEdges(MergeConfig& merge_config,
 
                 // create writer for this edge & adj list type
                 graphar::EdgeChunkWriter edge_writer(updated_edge_info, save_path.string()+"/", adj_lst->GetType(), 
-                                                     graphar::WriterOptions::DefaultWriterOption(),
+                                                     graphar::WriterOptions::ParquetOptionBuilder().store_schema(true).build(),
                                                      StringToValidateLevel(edge.validate_level));
                 
                 // calculate number of chunks according to the number of src/dst vertices

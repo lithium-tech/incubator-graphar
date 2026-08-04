@@ -85,7 +85,10 @@ std::string BuildPath(const std::vector<std::string>& paths) {
 }  // namespace
 
 bool operator==(const Property& lhs, const Property& rhs) {
-  return (lhs.name == rhs.name) && (lhs.type == rhs.type) &&
+  bool types_equal = (!lhs.type && !rhs.type) || 
+                     (lhs.type && rhs.type && *lhs.type == *rhs.type);
+  return (lhs.name == rhs.name) && 
+          types_equal  &&
          (lhs.is_primary == rhs.is_primary) &&
          (lhs.is_nullable == rhs.is_nullable) &&
          (lhs.cardinality == rhs.cardinality);

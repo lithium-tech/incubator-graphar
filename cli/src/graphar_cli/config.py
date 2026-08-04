@@ -112,7 +112,8 @@ class GraphArMergeConfig(GrapArBaseConfig):
 
 class Property(BaseModel):
     name: str
-    data_type: Literal["bool", "int16", "int32", "int64", "float", "double", "string", "date", "timestamp"]
+    data_type: Literal["bool", "int16", "int32", "int64", "float", "double", "string", "date", "timestamp",
+                       "list<int16>", "list<int32>", "list<int64>", "list<float>", "list<double>", "list<string>"]  # large list
     is_primary: bool = False
     nullable: Optional[bool] = None
 

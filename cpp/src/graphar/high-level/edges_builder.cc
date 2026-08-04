@@ -29,7 +29,8 @@
 namespace graphar::builder {
 
 Status EdgesBuilder::Dump(int chunk, const std::shared_ptr<arrow::Table>& table) {
-  EdgeChunkWriter writer = *EdgeChunkWriter::Make(edge_info_, prefix_, adj_list_type_, validate_level_).value();
+  auto options = WriterOptions::ParquetOptionBuilder().store_schema(true).build();  // save arrow schema
+  EdgeChunkWriter writer = *EdgeChunkWriter::Make(edge_info_, prefix_, adj_list_type_, options, validate_level_).value();
 
   // dump the offsets
   if (adj_list_type_ == AdjListType::ordered_by_source ||
