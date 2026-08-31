@@ -164,6 +164,112 @@ void ProcessArray(
   }
 }
 
+void CheckNonNullableCollumnsVertex(
+    const std::shared_ptr<const arrow::Table> table,
+    const std::unordered_map<std::string, Property>& column_prop_map) {
+
+  for (const auto& [column, prop] : column_prop_map) {
+
+    auto arrow_data_type = graphar::DataType::DataTypeToArrowDataType(
+        graphar::DataType::TypeNameToDataType(prop.data_type));
+    auto arrow_column = table->GetColumnByName(column);
+
+    if (!prop.nullable) {
+      for (const auto& chunk : arrow_column->chunks()) {
+        if (chunk->null_count() > 0) {
+          throw std::runtime_error("Non-nullable column '" + column +
+                                  "' has null values");
+        }
+      }
+    }
+  }
+}
+
+std::unordered_map<
+      std::string, 
+      std::pair<std::string, std::shared_ptr<arrow::DataType>>> CollectColumnsToChangeVertex(
+                    const std::shared_ptr<const arrow::Table> table,
+                    const std::unordered_map<std::string, Property>& column_prop_map) {
+
+  std::unordered_map<
+      std::string, 
+      std::pair<std::string, std::shared_ptr<arrow::DataType>>> columns_to_change;
+
+  for (const auto& [column, prop] : column_prop_map) {
+    auto arrow_data_type = graphar::DataType::DataTypeToArrowDataType(
+        graphar::DataType::TypeNameToDataType(prop.data_type));
+    auto arrow_column = table->GetColumnByName(column);
+
+    if (column != prop.name ||
+        arrow_column->type()->id() != arrow_data_type->id() ||
+          arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
+          std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
+          std::static_pointer_cast<arrow::TimestampType>(
+              graphar::DataType::DataTypeToArrowDataType(
+                  graphar::DataType::TypeNameToDataType("timestamp")
+              )
+          )->unit()) {
+      columns_to_change[column] =
+          std::make_pair(prop.name, arrow_data_type);
+    }
+  }
+
+  return columns_to_change;
+}
+
+
+void CheckNonNullableCollumnsEdge(
+    const std::shared_ptr<const arrow::Table> table,
+    const std::unordered_map<std::string, graphar::Property>& column_prop_map) {
+
+  for (const auto& [column, prop] : column_prop_map) {
+    auto arrow_data_type =
+        graphar::DataType::DataTypeToArrowDataType(prop.type);
+    auto arrow_column = table->GetColumnByName(column);
+    if (!prop.is_nullable) {
+      for (const auto& chunk : arrow_column->chunks()) {
+        if (chunk->null_count() > 0) {
+          throw std::runtime_error("Non-nullable column '" + column +
+                                    "' has null values");
+        }
+      }
+    }
+  }
+}
+
+std::unordered_map<
+      std::string, 
+      std::pair<std::string, std::shared_ptr<arrow::DataType>>> CollectColumnsToChangeEdge(
+                    const std::shared_ptr<const arrow::Table> table,
+                    const std::unordered_map<std::string, graphar::Property>& column_prop_map) {
+
+  std::unordered_map<
+      std::string, 
+      std::pair<std::string, std::shared_ptr<arrow::DataType>>> columns_to_change;
+
+  for (const auto& [column, prop] : column_prop_map) {
+
+    auto arrow_data_type =
+        graphar::DataType::DataTypeToArrowDataType(prop.type);
+    auto arrow_column = table->GetColumnByName(column);
+    
+    if (column != prop.name ||
+        arrow_column->type()->id() != arrow_data_type->id() ||
+        arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
+        std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
+        std::static_pointer_cast<arrow::TimestampType>(
+            graphar::DataType::DataTypeToArrowDataType(
+                graphar::DataType::TypeNameToDataType("timestamp")
+            )
+        )->unit()) {  
+      columns_to_change[column] =
+          std::make_pair(prop.name, arrow_data_type);
+    }
+  }
+
+  return columns_to_change;
+}
+
 } // namespace
 
 std::string DoImport(const py::dict& config_dict) {
@@ -254,19 +360,6 @@ std::string DoImport(const py::dict& config_dict) {
       }
       logger("  Source columns collected: "+std::to_string(column_names.size()));
 
-      std::shared_ptr<arrow::Table> table;
-      {
-        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
-
-        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
-        for (int i = 0; i < source.path.size(); ++i) {
-          file_tables[i] = GetDataFromFile(source.path[i], column_names, source.delimiter,
-                            source.file_type);
-        }
-        table = ConcatenateTables(file_tables).ValueOrDie();
-      }
-      logger("Vertex sources read.");
-
       std::unordered_map<std::string, Property> column_prop_map;
       std::unordered_map<std::string, std::string> reversed_columns_config;
       for (const auto& [key, value] : source.columns) {
@@ -278,36 +371,24 @@ std::string DoImport(const py::dict& config_dict) {
         }
       }
 
-      std::unordered_map<
-          std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>
-          columns_to_change;
-      for (const auto& [column, prop] : column_prop_map) {
-        auto arrow_data_type = graphar::DataType::DataTypeToArrowDataType(
-            graphar::DataType::TypeNameToDataType(prop.data_type));
-        auto arrow_column = table->GetColumnByName(column);
-        // TODO: whether need to check duplicate values for primary key?
-        if (!prop.nullable) {
-          for (const auto& chunk : arrow_column->chunks()) {
-            if (chunk->null_count() > 0) {
-              throw std::runtime_error("Non-nullable column '" + column +
-                                      "' has null values");
-            }
-          }
+      std::shared_ptr<arrow::Table> table;
+      {
+        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
+        for (int i = 0; i < source.path.size(); ++i) {
+          file_tables[i] = GetDataFromFile(source.path[i], column_names, source.delimiter,
+                            source.file_type);
+
+          CheckNonNullableCollumnsVertex(file_tables[i], column_prop_map);
+          auto columns_to_change = CollectColumnsToChangeVertex(file_tables[i], column_prop_map);
+          file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
         }
-        if (column != prop.name ||
-            arrow_column->type()->id() != arrow_data_type->id() ||
-              arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
-              std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
-              std::static_pointer_cast<arrow::TimestampType>(
-                  graphar::DataType::DataTypeToArrowDataType(
-                      graphar::DataType::TypeNameToDataType("timestamp")
-                  )
-              )->unit()) {
-          columns_to_change[column] =
-              std::make_pair(prop.name, arrow_data_type);
-        }
+        
+        table = ConcatenateTables(file_tables).ValueOrDie();
       }
-      table = ChangeNameAndDataType(table, columns_to_change);
+      logger("Vertex sources read.");
+
       vertex_tables.push_back(table);
     }
     std::shared_ptr<arrow::Table> merged_vertex_table =
@@ -427,25 +508,11 @@ std::string DoImport(const py::dict& config_dict) {
           column_names.emplace_back(key);
         }
 
-        std::shared_ptr<arrow::Table> table;
-        {
-          std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
-
-          #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
-          for (int i = 0; i < source.path.size(); ++i) {
-            file_tables[i] = GetDataFromFile(source.path[i], column_names,
-                                             source.delimiter, source.file_type);
-          }
-          table = ConcatenateTables(file_tables).ValueOrDie();
-          logger("edge <"+edge.edge_type+"> "+std::to_string(source.path.size()) +" tables concatenated");
-        }
-
         std::unordered_map<std::string, graphar::Property> column_prop_map;
         std::unordered_map<std::string, std::string> reversed_columns;
         for (const auto& [key, value] : source.columns) {
           reversed_columns[value] = key;
         }
-
         for (const auto& pg : edge.property_groups) {
           for (const auto& prop : pg.properties) {
             column_prop_map[reversed_columns[prop.name]] = graphar::Property(
@@ -454,7 +521,6 @@ std::string DoImport(const py::dict& config_dict) {
                 prop.is_primary, prop.nullable);
           }
         }
-        logger("edge <"+edge.edge_type+"> property groups: end");
 
         const auto &src_prop = vertex_prop_property_map.at(std::make_pair(edge.src_type, edge.src_prop));
         column_prop_map[reversed_columns.at(edge.src_edge_prop)] = graphar::Property(
@@ -467,38 +533,26 @@ std::string DoImport(const py::dict& config_dict) {
             dst_prop.type,
             dst_prop.is_primary, dst_prop.is_nullable);
 
-        std::unordered_map<
-            std::string,
-            std::pair<std::string, std::shared_ptr<arrow::DataType>>>
-            columns_to_change;
-        for (const auto& [column, prop] : column_prop_map) {
-          auto arrow_data_type =
-              graphar::DataType::DataTypeToArrowDataType(prop.type);
-          auto arrow_column = table->GetColumnByName(column);
-          if (!prop.is_nullable) {
-            for (const auto& chunk : arrow_column->chunks()) {
-              if (chunk->null_count() > 0) {
-                throw std::runtime_error("Non-nullable column '" + column +
-                                         "' has null values");
-              }
-            }
+        logger("edge <"+edge.edge_type+"> property groups: end");
+
+        std::shared_ptr<arrow::Table> table;
+        {
+          std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+          #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
+          for (int i = 0; i < source.path.size(); ++i) {
+            file_tables[i] = GetDataFromFile(source.path[i], column_names,
+                                             source.delimiter, source.file_type);
+
+            CheckNonNullableCollumnsEdge(file_tables[i], column_prop_map);
+            auto columns_to_change = CollectColumnsToChangeEdge(file_tables[i], column_prop_map);
+            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
           }
-          if (column != prop.name ||
-              arrow_column->type()->id() != arrow_data_type->id() ||
-              arrow_column->type()->id() == arrow::Type::TIMESTAMP &&
-              std::static_pointer_cast<arrow::TimestampType>(arrow_column->type())->unit() != 
-              std::static_pointer_cast<arrow::TimestampType>(
-                  graphar::DataType::DataTypeToArrowDataType(
-                      graphar::DataType::TypeNameToDataType("timestamp")
-                  )
-              )->unit()) {  
-            columns_to_change[column] =
-                std::make_pair(prop.name, arrow_data_type);
-          }
+
+          table = ConcatenateTables(file_tables).ValueOrDie();
+          logger("edge <"+edge.edge_type+"> "+std::to_string(source.path.size()) +" tables concatenated");
         }
-        logger("Name and data type are about to change.");
-        table = ChangeNameAndDataType(table, columns_to_change);
-        logger("edge <"+edge.edge_type+"> table columns changed");
+
         edge_tables.push_back(table);
         logger("edge <"+edge.edge_type+"> table added");
       }

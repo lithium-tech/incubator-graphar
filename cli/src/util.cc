@@ -261,30 +261,46 @@ std::shared_ptr<arrow::Table> GetDataFromJsonFile(
   return table;
 }
 
+// might be useful in future, not tested
 /*arrow::Result<std::shared_ptr<arrow::RecordBatchReader>> OpenParquetAsBatch(
-    const std::string& path, const std::vector<std::string>& column_names) {
+    const std::string& path,
+    const std::vector<std::string>& column_names) {
 
   ARROW_ASSIGN_OR_RAISE(auto input, arrow::io::ReadableFile::Open(path));
-  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
 
-  ARROW_RETURN_NOT_OK(parquet::arrow::OpenFile(input, arrow::default_memory_pool(), &parquet_reader));
+  ARROW_ASSIGN_OR_RAISE(
+    std::unique_ptr<parquet::arrow::FileReader> parquet_reader,
+    parquet::arrow::OpenFile(input, arrow::default_memory_pool())
+  );
 
-  // Retrieve the Arrow schema from the Parquet file
   std::shared_ptr<arrow::Schema> schema;
   ARROW_RETURN_NOT_OK(parquet_reader->GetSchema(&schema));
 
-  // Map column names to their indices in the schema
   std::vector<int> column_indices;
-  column_indices.reserve(column_names.size());
-  for (const auto& col_name : column_names) {
-    int64_t index = schema->GetFieldIndex(col_name);
-    if (index == -1) {
-      return arrow::Status::Invalid("Column not found in schema: " + col_name);
+
+  if (column_names.empty()) {
+    column_indices.resize(schema->num_fields());
+    std::iota(column_indices.begin(), column_indices.end(), 0);
+  } else {
+    column_indices.reserve(column_names.size());
+
+    for (const auto& col_name : column_names) {
+      auto indices = schema->GetAllFieldIndices(col_name);
+
+      if (indices.empty()) {
+        return arrow::Status::Invalid(
+            "Column not found in schema: ", col_name);
+      }
+
+      if (indices.size() > 1) {
+        return arrow::Status::Invalid(
+            "Column name is ambiguous in schema: ", col_name);
+      }
+
+      column_indices.push_back(indices[0]);
     }
-    column_indices.push_back(index);
   }
 
-  // Create batch reader
   std::vector<int> row_groups(parquet_reader->num_row_groups());
   std::iota(row_groups.begin(), row_groups.end(), 0);
 
@@ -304,15 +320,20 @@ std::shared_ptr<arrow::RecordBatchReader> GetDataAsBatch(
 
     if (file_type == "parquet") {
       auto result = OpenParquetAsBatch(path, column_names);
+
       if (!result.ok()) {
-        throw std::runtime_error("Colud not open file: " + path);
+        throw std::runtime_error(
+            "Could not open file: '" + path + "'. Reason: " +
+            result.status().ToString());
       }
+
       return result.ValueOrDie();;
     } else {
-      // TODO: add csv, orc, json, any imprtant format
+      // TODO: add csv, orc, json, etc
       throw std::runtime_error("Unsupported file type: " + file_type);
     }
-}*/
+}
+*/
 
 std::shared_ptr<arrow::Table> GetDataFromFile(
     const std::string& path, const std::vector<std::string>& column_names,

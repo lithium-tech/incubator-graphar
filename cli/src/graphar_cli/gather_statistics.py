@@ -31,6 +31,8 @@ def find_all_paths(filename: str) -> list[[str, str]]:
             vertex_data = yaml.safe_load(f)
             prefix = vertex_data["prefix"]
             path_to_vertex = path2graph + '/' + prefix
+            if "property_groups" not in vertex_data:
+                continue
             for property_group in vertex_data["property_groups"]:
                 all_tables.append([path_to_vertex + property_group["prefix"], vertex])
 
@@ -40,6 +42,8 @@ def find_all_paths(filename: str) -> list[[str, str]]:
         with open(path_to_edge, "r") as f:
             edge_data = yaml.safe_load(f)
             path_to_edge = path2graph + '/' + edge_data["prefix"] + '/' + edge_data["adj_lists"][0]["prefix"]
+            if "property_groups" not in edge_data:
+                continue
             for property_group in edge_data["property_groups"]:
                 all_tables.append([path_to_edge + property_group["prefix"], edge])
 

@@ -733,63 +733,6 @@ std::string FindPathToProperty(std::shared_ptr<const graphar::VertexInfo> vertex
     return vertex_info->GetPathPrefix(pg_with_user_PK).value();
 }
 
-std::shared_ptr<arrow::Table> ReadTable(const Source& source, size_t num_threads = 1) {
-
-    std::vector<std::string> new_column_names;
-    for (const auto& [key, value] : source.columns) {
-        new_column_names.emplace_back(key);
-    }
-
-    // Read source
-    std::shared_ptr<arrow::Table> table;
-    {
-        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
-
-        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
-        for (int i = 0; i < source.path.size(); ++i) {
-            file_tables[i] = GetDataFromFile(source.path[i], new_column_names, source.delimiter,
-                                source.file_type);
-        }
-        table = ConcatenateTables(file_tables).ValueOrDie();
-    }
-
-    return table;
-}
-
-std::shared_ptr<arrow::Table> ReadPropertiesFromTable(const Source& source, 
-                                                      const std::vector<Property>& properties, 
-                                                      const std::vector<std::string>& primary_attributes,
-                                                      size_t num_threads = 1) {
-
-    std::vector<std::string> columns_to_read{primary_attributes};
-    for (const auto& prop: properties)
-        columns_to_read.emplace_back(prop.name);
-
-    std::vector<std::string> new_column_names;
-    for(const auto& [data_column_name, prop_name] : source.columns) {
-        for (const auto& prop: columns_to_read) {
-            if (prop == prop_name) {
-                new_column_names.emplace_back(data_column_name);
-            }
-        }
-    }
-
-    // Read source
-    std::shared_ptr<arrow::Table> table;
-    {
-        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
-
-        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
-        for (int i = 0; i < source.path.size(); ++i) {
-            file_tables[i] = GetDataFromFile(source.path[i], new_column_names, source.delimiter,
-                                source.file_type);
-        }
-        table = ConcatenateTables(file_tables).ValueOrDie();
-    }
-
-    return table;
-}
-
 
 std::unordered_map<std::string, 
                    std::pair<std::string, std::shared_ptr<arrow::DataType>>> CollectColumnsToChange(
@@ -842,6 +785,76 @@ std::unordered_map<std::string,
     return columns_to_change;
 }
 
+
+std::shared_ptr<arrow::Table> ReadTable(const Source& source, const std::vector<PropertyGroup>& property_groups,
+                                        size_t num_threads = 1) {
+
+    std::vector<std::string> new_column_names;
+    for (const auto& [key, value] : source.columns) {
+        new_column_names.emplace_back(key);
+    }
+
+    // Read source
+    std::shared_ptr<arrow::Table> table;
+    {
+        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
+        for (int i = 0; i < source.path.size(); ++i) {
+            file_tables[i] = GetDataFromFile(source.path[i], new_column_names, source.delimiter,
+                                source.file_type);
+
+            auto columns_to_change = CollectColumnsToChange(source.columns, property_groups, file_tables[i]);
+            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+        }
+        table = ConcatenateTables(file_tables).ValueOrDie();
+    }
+
+    return table;
+}
+
+std::shared_ptr<arrow::Table> ReadPropertiesFromTable(const Source& source, 
+                                                      const std::vector<Property>& properties, 
+                                                      const PropertyGroup& pg,
+                                                      const std::vector<std::string>& primary_attributes,
+                                                      size_t num_threads = 1) {
+
+    std::vector<std::string> columns_to_read{primary_attributes};
+    for (const auto& prop: properties)
+        columns_to_read.emplace_back(prop.name);
+
+    std::vector<std::string> new_column_names;
+    for(const auto& [data_column_name, prop_name] : source.columns) {
+        for (const auto& prop: columns_to_read) {
+            if (prop == prop_name) {
+                new_column_names.emplace_back(data_column_name);
+            }
+        }
+    }
+
+    // Read source
+    std::shared_ptr<arrow::Table> table;
+    {
+        std::vector<std::shared_ptr<arrow::Table>> file_tables(source.path.size());
+
+        #pragma omp parallel for schedule(dynamic) num_threads(std::min(num_threads, source.path.size()))
+        for (int i = 0; i < source.path.size(); ++i) {
+            file_tables[i] = GetDataFromFile(source.path[i], new_column_names, source.delimiter,
+                                source.file_type);
+
+            // Change name and data type
+            std::unordered_map<
+                std::string,
+                std::pair<std::string, std::shared_ptr<arrow::DataType>>>
+                columns_to_change = CollectColumnsToChange(source.columns, std::vector<PropertyGroup>{pg}, file_tables[i]);
+            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+        }
+        table = ConcatenateTables(file_tables).ValueOrDie();
+    }
+
+    return table;
+}
+
 std::shared_ptr<arrow::Table> MakeMergedVertexTable(const MergeVertex& vertex,
                                                     size_t num_threads = 1) {
 
@@ -849,9 +862,7 @@ std::shared_ptr<arrow::Table> MakeMergedVertexTable(const MergeVertex& vertex,
     for(const Source& source : vertex.sources) {
 
         // Read source & cnage name and data type
-        std::shared_ptr<arrow::Table> table = ReadTable(source, num_threads);
-        auto columns_to_change = CollectColumnsToChange(source.columns, vertex.property_groups, table);
-        table = ChangeNameAndDataType(table, columns_to_change);
+        std::shared_ptr<arrow::Table> table = ReadTable(source, vertex.property_groups, num_threads);
         vertex_tables.push_back(table);
     }
             
@@ -1393,23 +1404,16 @@ void MergeEdges(MergeConfig& merge_config,
             // 1.3.1 Define which source has this PG data
             Source source_PG = GetSourceContainingAllProperties(edge.sources, pg.properties);
 
-            // 1.3.2 Read source table with new PG
-            std::shared_ptr<arrow::Table> pg_data_table = ReadPropertiesFromTable(source_PG, pg.properties, 
-                                                                                  {edge.src_edge_prop, edge.dst_edge_prop}, num_threads);
-            logger("    PG source read: "+std::to_string(source_PG.path.size()) +" tables concatenated.");
-            
             std::unordered_map<std::string, std::string> reversed_columns;
             for (const auto& [key, value] : source_PG.columns) {
                 reversed_columns[value] = key;
             }
 
-            // Change name and data type
-            std::unordered_map<
-                std::string,
-                std::pair<std::string, std::shared_ptr<arrow::DataType>>>
-                columns_to_change = CollectColumnsToChange(source_PG.columns, std::vector<PropertyGroup>{pg}, pg_data_table);
-            pg_data_table = ChangeNameAndDataType(pg_data_table, columns_to_change);
-            logger("    Name & data type changed, columns to change: "+std::to_string(columns_to_change.size()));
+            // 1.3.2 Read source table with new PG
+            std::shared_ptr<arrow::Table> pg_data_table = ReadPropertiesFromTable(source_PG, pg.properties, pg,
+                                                                                  {edge.src_edge_prop, edge.dst_edge_prop}, num_threads);
+            logger("    PG source read: "+std::to_string(source_PG.path.size()) +" tables concatenated.");
+
             pg_data_table = pg_data_table->CombineChunks().ValueOrDie();
 
             // 1.3.3 Get columns with src&dst
