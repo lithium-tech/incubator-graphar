@@ -43,6 +43,19 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+
+// Helper to access protected fields of arrow::ChunkedArray
+class ChunkedArrayAccessor: public arrow::ChunkedArray {
+public:
+  static arrow::ArrayVector& mutable_chunks(arrow::ChunkedArray& other) {
+    arrow::ArrayVector arrow::ChunkedArray::* chunks_ptr = &ChunkedArrayAccessor::chunks_;
+    return other.*chunks_ptr;
+  }
+};
+
+} // namespace
+
 std::string ConcatEdgeTriple(const std::string& src_type,
                              const std::string& edge_type,
                              const std::string& dst_type) {
@@ -649,6 +662,87 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
   auto new_table = arrow::Table::Make(new_schema, new_columns);
 
   return new_table;
+}
+
+void ChangeNameAndDataTypeInPlace(
+    std::shared_ptr<arrow::Table>& table,
+    const std::unordered_map<
+        std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>&
+        columns_to_change) {
+  // Retrieve original schema and number of columns
+  auto original_schema = table->schema();
+  int64_t num_columns = table->num_columns();
+
+  // Prepare vectors for new schema fields and new column data
+  std::vector<std::shared_ptr<arrow::Field>> new_fields;
+  std::vector<std::shared_ptr<arrow::ChunkedArray>> new_columns;
+  new_fields.reserve(num_columns);
+  new_columns.reserve(num_columns);
+
+  for (int64_t i = 0; i < num_columns; ++i) {
+    std::shared_ptr<arrow::Field> original_field = original_schema->field(i);
+    std::shared_ptr<arrow::ChunkedArray> original_column = table->column(i);
+
+    std::string original_name = original_field->name();
+    std::shared_ptr<arrow::DataType> original_type = original_field->type();
+
+    // Check if this column needs to be changed
+    auto it = columns_to_change.find(original_name);
+    if (it != columns_to_change.end()) {
+      std::string new_name = it->second.first;
+      std::shared_ptr<arrow::DataType> new_type = it->second.second;
+      std::shared_ptr<arrow::ChunkedArray> new_chunked_array;
+
+      bool name_changed = (new_name != original_name);
+      bool type_changed = !original_type->Equals(*new_type);
+
+      // If data type needs to be changed, cast each chunk
+      if (type_changed) {
+        // Modifying columns in-place
+        std::vector<std::shared_ptr<arrow::Array>>& chunks =
+            ChunkedArrayAccessor::mutable_chunks(*original_column);
+
+        for (size_t chunk_i = 0; chunk_i < chunks.size(); ++chunk_i) {
+          const std::shared_ptr<arrow::Array>& chunk = chunks[chunk_i];
+          // Perform type casting using Compute API
+          arrow::compute::CastOptions cast_options;
+          cast_options.allow_int_overflow = false;  // Set as needed
+          cast_options.allow_time_truncate = true;
+
+          arrow::Result<std::shared_ptr<arrow::Array>> cast_result =
+              arrow::compute::Cast(*chunk, new_type, cast_options);
+          if (!cast_result.ok()) {
+            std::cerr << cast_result.status().ToString() << std::endl;
+            throw std::runtime_error("Failed to cast column data.");
+          }
+          chunks[chunk_i] = *cast_result;
+        }
+        // Create a new ChunkedArray with modified chunks for proper types
+        new_chunked_array =
+            std::make_shared<arrow::ChunkedArray>(chunks, new_type);
+      } else {
+        // If type is not changed, keep the original column
+        new_chunked_array = original_column;
+      }
+
+      // Create a new Field with the updated name and type
+      auto new_field =
+          arrow::field(new_name, type_changed ? new_type : original_type,
+                       original_field->nullable());
+      new_fields.push_back(new_field);
+      new_columns.push_back(new_chunked_array);
+    } else {
+      // Columns not in the change map remain unchanged
+      new_fields.push_back(original_field);
+      new_columns.push_back(original_column);
+    }
+  }
+
+  // Create the new schema
+  auto new_schema = arrow::schema(new_fields);
+
+  // Construct the new table with updated schema and modified columns
+  table = arrow::Table::Make(new_schema, new_columns);
 }
 
 std::shared_ptr<arrow::Table> MergeTables(

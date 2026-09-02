@@ -382,7 +382,7 @@ std::string DoImport(const py::dict& config_dict) {
 
           CheckNonNullableCollumnsVertex(file_tables[i], column_prop_map);
           auto columns_to_change = CollectColumnsToChangeVertex(file_tables[i], column_prop_map);
-          file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+          ChangeNameAndDataTypeInPlace(file_tables[i], columns_to_change);
         }
         
         table = ConcatenateTables(file_tables).ValueOrDie();
@@ -546,7 +546,7 @@ std::string DoImport(const py::dict& config_dict) {
 
             CheckNonNullableCollumnsEdge(file_tables[i], column_prop_map);
             auto columns_to_change = CollectColumnsToChangeEdge(file_tables[i], column_prop_map);
-            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+            ChangeNameAndDataTypeInPlace(file_tables[i], columns_to_change);
           }
 
           table = ConcatenateTables(file_tables).ValueOrDie();
