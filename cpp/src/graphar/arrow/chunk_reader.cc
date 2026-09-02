@@ -166,6 +166,7 @@ VertexPropertyArrowChunkReader::VertexPropertyArrowChunkReader(
     : vertex_info_(std::move(vertex_info)),
       property_group_(std::move(property_group)),
       property_names_(std::move(property_names)),
+      uri_(prefix),
       chunk_index_(0),
       seek_id_(0),
       schema_(nullptr),
@@ -176,9 +177,9 @@ VertexPropertyArrowChunkReader::VertexPropertyArrowChunkReader(
                             vertex_info->GetPathPrefix(property_group));
   std::string base_dir = prefix_ + pg_path_prefix;
   GAR_ASSIGN_OR_RAISE_ERROR(chunk_num_,
-                            util::GetVertexChunkNum(prefix_, vertex_info));
+                            util::GetVertexChunkNum(uri_, vertex_info));
   GAR_ASSIGN_OR_RAISE_ERROR(vertex_num_,
-                            util::GetVertexNum(prefix_, vertex_info_));
+                            util::GetVertexNum(uri_, vertex_info_));
   GAR_ASSIGN_OR_RAISE_ERROR(schema_,
                             PropertyGroupToSchema(property_group_, true));
 }
@@ -190,6 +191,7 @@ VertexPropertyArrowChunkReader::VertexPropertyArrowChunkReader(
     const util::FilterOptions& options)
     : vertex_info_(std::move(vertex_info)),
       labels_(labels),
+      uri_(prefix),
       chunk_index_(0),
       seek_id_(0),
       schema_(nullptr),
@@ -200,9 +202,9 @@ VertexPropertyArrowChunkReader::VertexPropertyArrowChunkReader(
   std::string base_dir = prefix_ + vertex_info_->GetPrefix() + "labels/chunk" +
                          std::to_string(chunk_index_);
   GAR_ASSIGN_OR_RAISE_ERROR(chunk_num_,
-                            util::GetVertexChunkNum(prefix_, vertex_info));
+                            util::GetVertexChunkNum(uri_, vertex_info));
   GAR_ASSIGN_OR_RAISE_ERROR(vertex_num_,
-                            util::GetVertexNum(prefix_, vertex_info_));
+                            util::GetVertexNum(uri_, vertex_info_));
   GAR_ASSIGN_OR_RAISE_ERROR(schema_, LabelToSchema(labels));
 }
 
@@ -523,6 +525,7 @@ AdjListArrowChunkReader::AdjListArrowChunkReader(
     : edge_info_(edge_info),
       adj_list_type_(adj_list_type),
       prefix_(prefix),
+      uri_(prefix),
       vertex_chunk_index_(0),
       chunk_index_(0),
       seek_offset_(0),
@@ -534,7 +537,7 @@ AdjListArrowChunkReader::AdjListArrowChunkReader(
   base_dir_ = prefix_ + adj_list_path_prefix;
   GAR_ASSIGN_OR_RAISE_ERROR(
       vertex_chunk_num_,
-      util::GetVertexChunkNum(prefix_, edge_info_, adj_list_type_));
+      util::GetVertexChunkNum(uri_, edge_info_, adj_list_type_));
 }
 
 AdjListArrowChunkReader::AdjListArrowChunkReader(
@@ -542,6 +545,7 @@ AdjListArrowChunkReader::AdjListArrowChunkReader(
     : edge_info_(other.edge_info_),
       adj_list_type_(other.adj_list_type_),
       prefix_(other.prefix_),
+      uri_(other.uri_),
       vertex_chunk_index_(other.vertex_chunk_index_),
       chunk_index_(other.chunk_index_),
       seek_offset_(other.seek_offset_),
@@ -577,7 +581,7 @@ Status AdjListArrowChunkReader::seek_src(IdType id) {
     return seek(0);  // start from first chunk
   } else {
     GAR_ASSIGN_OR_RAISE(auto range,
-                        util::GetAdjListOffsetOfVertex(edge_info_, prefix_,
+                        util::GetAdjListOffsetOfVertex(edge_info_, uri_,
                                                        adj_list_type_, id));
     return seek(range.first);
   }
@@ -610,7 +614,7 @@ Status AdjListArrowChunkReader::seek_dst(IdType id) {
     return seek(0);  // start from the first chunk
   } else {
     GAR_ASSIGN_OR_RAISE(auto range,
-                        util::GetAdjListOffsetOfVertex(edge_info_, prefix_,
+                        util::GetAdjListOffsetOfVertex(edge_info_, uri_,
                                                        adj_list_type_, id));
     return seek(range.first);
   }
@@ -640,7 +644,7 @@ Result<std::shared_ptr<arrow::Table>> AdjListArrowChunkReader::GetChunk() {
   if (chunk_table_ == nullptr) {
     // check if the edge num of the current vertex chunk is 0
     GAR_ASSIGN_OR_RAISE(auto edge_num,
-                        util::GetEdgeNum(prefix_, edge_info_, adj_list_type_,
+                        util::GetEdgeNum(uri_, edge_info_, adj_list_type_,
                                          vertex_chunk_index_));
     if (edge_num == 0) {
       return nullptr;
@@ -730,7 +734,7 @@ Result<std::shared_ptr<AdjListArrowChunkReader>> AdjListArrowChunkReader::Make(
 
 Status AdjListArrowChunkReader::initOrUpdateEdgeChunkNum() {
   GAR_ASSIGN_OR_RAISE(chunk_num_,
-                      util::GetEdgeChunkNum(prefix_, edge_info_, adj_list_type_,
+                      util::GetEdgeChunkNum(uri_, edge_info_, adj_list_type_,
                                             vertex_chunk_index_));
   return Status::OK();
 }
@@ -741,6 +745,7 @@ AdjListOffsetArrowChunkReader::AdjListOffsetArrowChunkReader(
     : edge_info_(std::move(edge_info)),
       adj_list_type_(adj_list_type),
       prefix_(prefix),
+      uri_(prefix),
       chunk_index_(0),
       seek_id_(0),
       chunk_table_(nullptr) {
@@ -753,7 +758,7 @@ AdjListOffsetArrowChunkReader::AdjListOffsetArrowChunkReader(
       adj_list_type == AdjListType::ordered_by_dest) {
     GAR_ASSIGN_OR_RAISE_ERROR(
         vertex_chunk_num_,
-        util::GetVertexChunkNum(prefix_, edge_info_, adj_list_type_));
+        util::GetVertexChunkNum(uri_, edge_info_, adj_list_type_));
     vertex_chunk_size_ = adj_list_type == AdjListType::ordered_by_source
                              ? edge_info_->GetSrcChunkSize()
                              : edge_info_->GetDstChunkSize();
@@ -845,6 +850,7 @@ AdjListPropertyArrowChunkReader::AdjListPropertyArrowChunkReader(
       property_group_(std::move(property_group)),
       adj_list_type_(adj_list_type),
       prefix_(prefix),
+      uri_(prefix),
       vertex_chunk_index_(0),
       chunk_index_(0),
       seek_offset_(0),
@@ -859,7 +865,7 @@ AdjListPropertyArrowChunkReader::AdjListPropertyArrowChunkReader(
   base_dir_ = prefix_ + pg_path_prefix;
   GAR_ASSIGN_OR_RAISE_ERROR(
       vertex_chunk_num_,
-      util::GetVertexChunkNum(prefix_, edge_info_, adj_list_type_));
+      util::GetVertexChunkNum(uri_, edge_info_, adj_list_type_));
   GAR_ASSIGN_OR_RAISE_ERROR(schema_,
                             PropertyGroupToSchema(property_group, false));
 }
@@ -870,6 +876,7 @@ AdjListPropertyArrowChunkReader::AdjListPropertyArrowChunkReader(
       property_group_(other.property_group_),
       adj_list_type_(other.adj_list_type_),
       prefix_(other.prefix_),
+      uri_(other.uri_),
       vertex_chunk_index_(other.vertex_chunk_index_),
       chunk_index_(other.chunk_index_),
       seek_offset_(other.seek_offset_),
@@ -906,7 +913,7 @@ Status AdjListPropertyArrowChunkReader::seek_src(IdType id) {
     return seek(0);  // start from first chunk
   } else {
     GAR_ASSIGN_OR_RAISE(auto range,
-                        util::GetAdjListOffsetOfVertex(edge_info_, prefix_,
+                        util::GetAdjListOffsetOfVertex(edge_info_, uri_,
                                                        adj_list_type_, id));
     return seek(range.first);
   }
@@ -938,7 +945,7 @@ Status AdjListPropertyArrowChunkReader::seek_dst(IdType id) {
     return seek(0);  // start from the first chunk
   } else {
     GAR_ASSIGN_OR_RAISE(auto range,
-                        util::GetAdjListOffsetOfVertex(edge_info_, prefix_,
+                        util::GetAdjListOffsetOfVertex(edge_info_, uri_,
                                                        adj_list_type_, id));
     return seek(range.first);
   }
@@ -970,7 +977,7 @@ AdjListPropertyArrowChunkReader::GetChunk() {
   if (chunk_table_ == nullptr) {
     // check if the edge num of the current vertex chunk is 0
     GAR_ASSIGN_OR_RAISE(auto edge_num,
-                        util::GetEdgeNum(prefix_, edge_info_, adj_list_type_,
+                        util::GetEdgeNum(uri_, edge_info_, adj_list_type_,
                                          vertex_chunk_index_));
     if (edge_num == 0) {
       return nullptr;
@@ -1093,7 +1100,7 @@ AdjListPropertyArrowChunkReader::Make(
 
 Status AdjListPropertyArrowChunkReader::initOrUpdateEdgeChunkNum() {
   GAR_ASSIGN_OR_RAISE(chunk_num_,
-                      util::GetEdgeChunkNum(prefix_, edge_info_, adj_list_type_,
+                      util::GetEdgeChunkNum(uri_, edge_info_, adj_list_type_,
                                             vertex_chunk_index_));
   return Status::OK();
 }

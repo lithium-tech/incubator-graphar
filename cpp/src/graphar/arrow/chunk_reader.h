@@ -260,6 +260,7 @@ class VertexPropertyArrowChunkReader {
   std::shared_ptr<PropertyGroup> property_group_;
   std::vector<std::string> property_names_;
   std::string prefix_;
+  std::string uri_;
   std::vector<std::string> labels_;
   IdType chunk_index_;
   IdType seek_id_;
@@ -376,6 +377,7 @@ class AdjListArrowChunkReader {
   std::shared_ptr<EdgeInfo> edge_info_;
   AdjListType adj_list_type_;
   std::string prefix_;
+  std::string uri_;
   IdType vertex_chunk_index_, chunk_index_;
   IdType seek_offset_;
   std::shared_ptr<arrow::Table> chunk_table_;
@@ -459,6 +461,7 @@ class AdjListOffsetArrowChunkReader {
   std::shared_ptr<EdgeInfo> edge_info_;
   AdjListType adj_list_type_;
   std::string prefix_;
+  std::string uri_;
   IdType chunk_index_;
   IdType seek_id_;
   std::shared_ptr<arrow::Table> chunk_table_;
@@ -618,6 +621,7 @@ class AdjListPropertyArrowChunkReader {
   std::shared_ptr<PropertyGroup> property_group_;
   AdjListType adj_list_type_;
   std::string prefix_;
+  std::string uri_;
   IdType vertex_chunk_index_, chunk_index_;
   IdType seek_offset_;
   std::shared_ptr<arrow::Schema> schema_;

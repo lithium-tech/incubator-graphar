@@ -17,11 +17,14 @@
  * under the License.
  */
 
+#include <algorithm>
+#include <filesystem>
 #include <unordered_set>
 #include <utility>
 
 #include "graphar/status.h"
 #include "mini-yaml/yaml/Yaml.hpp"
+#include "simple-uri-parser/uri_parser.h"
 
 #include "graphar/filesystem.h"
 #include "graphar/graph_info.h"
@@ -1068,6 +1071,36 @@ static Result<std::shared_ptr<GraphInfo>> ConstructGraphInfo(
   }
   if (!graph_meta->operator[]("prefix").IsNone()) {
     prefix = graph_meta->operator[]("prefix").As<std::string>();
+    // The graph prefix is concatenated directly with chunk paths downstream
+    // (e.g. `prefix_ + chunk_file_path` in chunk_reader.cc), so a declared
+    // prefix must end with a trailing slash. Relative prefixes are resolved
+    // below, but they still have to declare the slash.
+    if (!prefix.empty() && prefix.back() != '/') {
+      return Status::Invalid(
+          "The graph prefix must end with a trailing slash, but got: ",
+          prefix);
+    }
+    auto uri = uri::parse_uri(prefix);
+    bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
+    if (!prefix.empty() && !is_remote &&
+        std::filesystem::path(prefix).is_relative()) {
+      while (prefix.rfind("./", 0) == 0) {
+        prefix = prefix.substr(2);
+      }
+      prefix = (std::filesystem::path(default_prefix) / prefix).string();
+    }
+  }
+  auto uri = uri::parse_uri(prefix);
+  bool is_remote = uri.error == uri::Error::None && !uri.scheme.empty();
+  if (!is_remote && std::filesystem::path(prefix).is_relative()) {
+    prefix = std::filesystem::absolute(prefix).string();
+    // std::filesystem::absolute may strip the trailing slash or use
+    // backslashes on Windows. Arrow expects POSIX-style separators, so
+    // normalize and ensure the trailing slash is preserved.
+    std::replace(prefix.begin(), prefix.end(), '\\', '/');
+    if (!prefix.empty() && prefix.back() != '/') {
+      prefix += '/';
+    }
   }
   std::shared_ptr<const InfoVersion> version = nullptr;
   if (!graph_meta->operator[]("version").IsNone()) {

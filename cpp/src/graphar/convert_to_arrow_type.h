@@ -59,6 +59,8 @@ struct TypeToArrowType {};
 
 CONVERT_TO_ARROW_TYPE(Type::BOOL, bool, arrow::BooleanType, arrow::BooleanArray,
                       arrow::BooleanBuilder, arrow::boolean(), "boolean")
+CONVERT_TO_ARROW_TYPE(Type::INT16, int16_t, arrow::Int16Type, arrow::Int16Array,
+                      arrow::Int16Builder, arrow::int16(), "int16")
 CONVERT_TO_ARROW_TYPE(Type::INT32, int32_t, arrow::Int32Type, arrow::Int32Array,
                       arrow::Int32Builder, arrow::int32(), "int32")
 CONVERT_TO_ARROW_TYPE(Type::INT64, int64_t, arrow::Int64Type, arrow::Int64Array,
