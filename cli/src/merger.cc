@@ -805,7 +805,7 @@ std::shared_ptr<arrow::Table> ReadTable(const Source& source, const std::vector<
                                 source.file_type);
 
             auto columns_to_change = CollectColumnsToChange(source.columns, property_groups, file_tables[i]);
-            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+            ChangeNameAndDataTypeInPlace(file_tables[i], columns_to_change);
         }
         table = ConcatenateTables(file_tables).ValueOrDie();
     }
@@ -847,7 +847,7 @@ std::shared_ptr<arrow::Table> ReadPropertiesFromTable(const Source& source,
                 std::string,
                 std::pair<std::string, std::shared_ptr<arrow::DataType>>>
                 columns_to_change = CollectColumnsToChange(source.columns, std::vector<PropertyGroup>{pg}, file_tables[i]);
-            file_tables[i] = ChangeNameAndDataType(file_tables[i], columns_to_change);
+            ChangeNameAndDataTypeInPlace(file_tables[i], columns_to_change);
         }
         table = ConcatenateTables(file_tables).ValueOrDie();
     }

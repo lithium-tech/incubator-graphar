@@ -161,6 +161,12 @@ std::shared_ptr<arrow::Table> ChangeNameAndDataType(
         std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>&
         columns_to_change);
 
+void ChangeNameAndDataTypeInPlace(
+    std::shared_ptr<arrow::Table>& table,
+    const std::unordered_map<
+        std::string, std::pair<std::string, std::shared_ptr<arrow::DataType>>>&
+        columns_to_change);
+
 std::shared_ptr<arrow::Table> MergeTables(
     const std::vector<std::shared_ptr<arrow::Table>>& tables);
 
