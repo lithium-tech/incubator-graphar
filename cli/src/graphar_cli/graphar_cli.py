@@ -42,6 +42,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
 from .config import ImportConfig, MergeConfig
 from .importer import validate
 from .logging import setup_logging
+from .settings_parser import parse_settings, SettingsSchema, ImportSettingsSchema, MergeSettingsSchema
 
 app = typer.Typer(
     help="GraphAr Cli",
@@ -52,6 +53,12 @@ app = typer.Typer(
 
 setup_logging()
 logger = getLogger(__name__)
+
+# options
+settings_option = typer.Option(
+    None, "--settings", "-s", help="Path to the optional GraphAr settings file of type '.yaml' " 
+                                   "with in-depth code configurations for better control over performance."
+)
 
 
 @app.command(
@@ -151,6 +158,7 @@ def check(
 def import_data(
     config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr config file"),
     debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+    settings_file: str = settings_option,
 ):
     if not Path(config_file).is_file():
         logger.error("File not found: %s", config_file)
@@ -164,9 +172,23 @@ def import_data(
     except Exception as e:
         logger.error("Invalid config: %s", e)
         raise typer.Exit(1) from None
+
+    if settings_file:
+        try:
+            settings = parse_settings(settings_file)
+        except Exception as e:
+            logger.error("Invalid settings config: %s", e)
+            raise typer.Exit(1) from None
+    else:
+        settings = SettingsSchema(
+            import_settings=ImportSettingsSchema(),
+            merge=MergeSettingsSchema()
+        )
+    print(settings.model_dump())
+
     try:
         logger.info("Starting import")
-        res = do_import(import_config.model_dump())
+        res = do_import(import_config.model_dump(), settings.model_dump())
         logger.info(res)
     except Exception as e:
         logger.error("Import failed: %s", e)
@@ -182,6 +204,7 @@ def import_data(
 def merge_data(
     config_file: str = typer.Option(None, "--config", "-c", help="Path of the GraphAr merge config file"),
     debug_mode: bool = typer.Option(False, "--debug", "-d", help="Debug mode"),
+    settings_file: str = settings_option,
 ):
     if not Path(config_file).is_file():
         logger.error("File not found: %s", config_file)
@@ -195,9 +218,23 @@ def merge_data(
     except Exception as e:
         logger.error("Invalid config: %s", e)
         raise typer.Exit(1) from None
+
+    if settings_file:
+        try:
+            settings = parse_settings(settings_file)
+        except Exception as e:
+            logger.error("Invalid settings config: %s", e)
+            raise typer.Exit(1) from None
+    else:
+        settings = SettingsSchema(
+            import_settings=ImportSettingsSchema(),
+            merge=MergeSettingsSchema()
+        )
+    print(settings.model_dump())
+
     try:
         logger.info("Starting merge")
-        res = do_merge(merge_config.model_dump()) 
+        res = do_merge(merge_config.model_dump(), settings.model_dump()) 
         logger.info(res)
     except Exception as e:
         logger.error("Merge failed: %s", e)

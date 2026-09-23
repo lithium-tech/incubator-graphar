@@ -1,0 +1,23 @@
+chunk_size: 10
+prefix: vertex/person/
+property_groups: 
+  - file_type: parquet
+    prefix: person_properties_1
+    properties: 
+      - data_type: int64
+        is_nullable: false
+        is_primary: true
+        name: passport
+      - data_type: string
+        is_nullable: false
+        is_primary: false
+        name: full_name
+  - file_type: parquet
+    prefix: person_properties_2
+    properties: 
+      - data_type: string
+        is_nullable: true
+        is_primary: false
+        name: birth_date
+type: person
+version: gar/v1

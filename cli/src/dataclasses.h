@@ -124,13 +124,11 @@ struct AbstractConfig {
 
 struct MergeConfig: public AbstractConfig {
   MergeSchema merge_schema;
-  std::string tmp_path;
 
   virtual void fill(const py::dict& config_dict) override {
     // graph description
     auto graphar_dict = config_dict["graphar"].cast<py::dict>();
     graphar_config.fill(graphar_dict);
-    tmp_path = graphar_dict["tmp_path"].cast<std::string>();
 
     // vertices + edges
     auto schema_dict = config_dict["merge_schema"].cast<py::dict>();
@@ -160,5 +158,44 @@ struct ImportConfig: public AbstractConfig {
 
     auto edges_list = schema_dict["edges"].cast<std::vector<py::dict>>();
     fill_data(import_schema.edges, edges_list);
+  }
+};
+
+
+struct ImportSettingsConfig {
+  int num_threads;
+
+  void fill(const py::dict& config_dict) {
+    auto dict = config_dict["import_settings"].cast<py::dict>();
+    num_threads = dict["num_threads"].cast<int>();
+  }
+};
+
+
+struct MergeSettingsConfig {
+  std::string tmp_path;
+  int num_of_drops;
+  int scale;
+  int num_threads_general;
+  int num_threads_build_edges;
+
+  void fill(const py::dict& config_dict) {
+    auto dict = config_dict["merge"].cast<py::dict>();
+
+    tmp_path = dict["tmp_path"].cast<std::string>();
+    num_of_drops = dict["num_of_drops"].cast<int>();
+    scale = dict["scale"].cast<int>();
+    num_threads_general = dict["num_threads_general"].cast<int>();
+    num_threads_build_edges = dict["num_threads_build_edges"].cast<int>();
+  }
+};
+
+struct SettingsConfig {
+  ImportSettingsConfig import;
+  MergeSettingsConfig merge;
+
+  void fill(const py::dict& config_dict) {
+    import.fill(config_dict);
+    merge.fill(config_dict);
   }
 };

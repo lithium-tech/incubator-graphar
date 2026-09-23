@@ -272,12 +272,17 @@ std::unordered_map<
 
 } // namespace
 
-std::string DoImport(const py::dict& config_dict) {
+std::string DoImport(const py::dict& config_dict, const py::dict& settings_dict) {
   logger("Start of import");
-  size_t num_threads =  omp_get_max_threads() / 2;
 
   ImportConfig import_config;
   import_config.fill(config_dict);
+
+  SettingsConfig settings_config;
+  settings_config.fill(settings_dict);
+
+  size_t num_threads = settings_config.import.num_threads;  // omp_get_max_threads() / 2 by default
+  logger("Using "+std::to_string(num_threads)+" threads.");
 
   auto version =
       graphar::InfoVersion::Parse(import_config.graphar_config.version).value();
@@ -566,6 +571,7 @@ std::string DoImport(const py::dict& config_dict) {
       auto combined_edge_table =
           merged_edge_table->CombineChunks().ValueOrDie();
       logger("Combined_edge_table created");
+
       auto edge_builder =
           graphar::builder::EdgesBuilder::Make(
               edge_info, save_path_str, adj_list->GetType(), vertex_count,
@@ -582,7 +588,7 @@ std::string DoImport(const py::dict& config_dict) {
       const int64_t num_rows = combined_edge_table->num_rows();
 
       //(multi-thread) mapping row to its bucket
-      std::cout << "Multi-tread mapping: starts in " << num_threads << " treads" << std::endl;
+      std::cout << "Multi-thread mapping: starts in " << num_threads << " threads" << std::endl;
 
       //calculating num of chunks
       int num_of_chunks = 0;
