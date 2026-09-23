@@ -1,0 +1,23 @@
+chunk_size: 10
+prefix: vertex/movie/
+property_groups: 
+  - file_type: parquet
+    prefix: movie_properties_1
+    properties: 
+      - data_type: int32
+        is_nullable: false
+        is_primary: true
+        name: movie_id
+      - data_type: string
+        is_nullable: false
+        is_primary: false
+        name: title
+  - file_type: parquet
+    prefix: movie_properties_2
+    properties: 
+      - data_type: int16
+        is_nullable: true
+        is_primary: false
+        name: duration_min
+type: movie
+version: gar/v1

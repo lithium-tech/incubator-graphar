@@ -923,7 +923,7 @@ void MergeVertexChunkwise(std::shared_ptr<arrow::Table> vertex_table,
 }
 
 
-void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
+void MergeVertices(const MergeConfig& merge_config, const SettingsConfig& settings_config) {
     // 0. Vertex load
     // 1. Read GraphAr Vertex info
     // 2. Modify & rewrite this vertex info
@@ -935,6 +935,9 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
     auto graph_info = graphar::GraphInfo::Load(
             merge_config.graphar_config.path+"/"+merge_config.graphar_config.name+".yaml").value();
     auto version = graphar::InfoVersion::Parse(merge_config.graphar_config.version).value();
+
+    size_t num_threads = settings_config.merge.num_threads_general;
+    logger("Using "+std::to_string(num_threads)+" threads for vertices.");
 
     std::unordered_map<std::string, graphar::IdType> vertex_chunk_sizes;
     GetVertexChunkSizes(graph_info, vertex_chunk_sizes);
@@ -983,7 +986,7 @@ void MergeVertices(const MergeConfig& merge_config, size_t num_threads = 1) {
         logger("    Looking for original data in "+path_original);
 
         // 1.3.3 Read new data
-        std::shared_ptr<arrow::Table> merged_vertex_table = MakeMergedVertexTable(vertex, num_threads = 1);
+        std::shared_ptr<arrow::Table> merged_vertex_table = MakeMergedVertexTable(vertex, num_threads);
 
         // 1.3.4 Save map[user_pk] = row-number-in-input-table
         // note: only int64/int32 keys are allowed
@@ -1195,7 +1198,6 @@ bool MapEdgeToChunk(std::vector<std::vector<std::vector<int64_t>>>& edge_to_chun
 
     // use importer approach
     bool wrote_tmp_files = false;
-    logger("    Mapping edge row to its chunk in "+std::to_string(num_threads)+" threads.");
     wrote_tmp_files = PreProcessArray(
                             column->chunk(0), edge_to_chunk_mapping,
                             vertex_prop_index_map, num_threads, vertex_chunk_size, 
@@ -1379,7 +1381,10 @@ void MergeEdges(MergeConfig& merge_config,
                 const std::shared_ptr<const graphar::GraphInfo> graph_info,
                 const std::map<std::pair<std::string, std::string>, 
                         std::unordered_map<int64_t, graphar::IdType>>& vertex_prop_index_map,
-                size_t num_threads = 1) {
+                const SettingsConfig& settings_config) {
+
+    size_t num_threads = settings_config.merge.num_threads_general;
+    logger("Using "+std::to_string(num_threads)+" threads for edges.");
 
     std::unordered_map<std::string, graphar::IdType> vertex_chunk_sizes;
     GetVertexChunkSizes(graph_info, vertex_chunk_sizes);
@@ -1429,7 +1434,6 @@ void MergeEdges(MergeConfig& merge_config,
             // 1.3.4 Work with each adj_lists type required by user
             for (const auto& adj_list : edge.adj_lists) {  // TODO: user demands adj_list that does not exist in original graph
                 logger("    Working with adj_list aligned by "+adj_list.aligned_by);
-                num_threads = omp_get_max_threads() / 2;
 
                 auto adj_lst = graphar::CreateAdjacentList(
                                     graphar::OrderedAlignedToAdjListType(adj_list.ordered,
@@ -1465,6 +1469,7 @@ void MergeEdges(MergeConfig& merge_config,
                     std::vector<std::vector<int64_t>>(num_of_chunks)
                 );
                 bool wrote_tmp_files = false;
+                std::string tmp_path = settings_config.merge.tmp_path;
                 logger("    Mapping edge row to its chunk in "+std::to_string(num_threads)+" threads.");
                 if (adj_lst->GetType() == graphar::AdjListType::ordered_by_source ||
                     adj_lst->GetType() == graphar::AdjListType::unordered_by_source)
@@ -1472,12 +1477,14 @@ void MergeEdges(MergeConfig& merge_config,
                     wrote_tmp_files = MapEdgeToChunk(edge_to_chunk_mapping, src_column, 
                                             vertex_prop_index_map.at(std::make_pair(edge.src_type, edge.src_prop)),
                                             graph_info->GetEdgeInfos()[0]->GetChunkSize(), edge_info->GetSrcChunkSize(),  // TODO: vertex cgunk size ???
-                                            merge_config.tmp_path, num_threads);
+                                            tmp_path, num_threads, 
+                                            settings_config.merge.scale, settings_config.merge.num_of_drops);
                 } else {
                     wrote_tmp_files = MapEdgeToChunk(edge_to_chunk_mapping, dst_column, 
                                             vertex_prop_index_map.at(std::make_pair(edge.dst_type, edge.dst_prop)),
                                             graph_info->GetEdgeInfos()[0]->GetChunkSize(), edge_info->GetDstChunkSize(),
-                                            merge_config.tmp_path, num_threads);
+                                            tmp_path, num_threads, 
+                                            settings_config.merge.scale, settings_config.merge.num_of_drops);
                 }
                 logger("    Mapping complete.");
 
@@ -1486,12 +1493,12 @@ void MergeEdges(MergeConfig& merge_config,
                                               + edge.prefix + adj_lst->GetPrefix()+"adj_list";
                 logger("    Looking for original data in "+path_to_adjlist);
 
-                num_threads = omp_get_max_threads() / 4;
-                logger("    Building edges in " + std::to_string(num_threads) + " threads.");
-                BuildEdge(path_to_adjlist, merge_config.tmp_path, wrote_tmp_files, edge_to_chunk_mapping,
+                size_t num_threads_build = settings_config.merge.num_threads_build_edges;
+                logger("    Building edges in " + std::to_string(num_threads_build) + " threads.");
+                BuildEdge(path_to_adjlist, tmp_path, wrote_tmp_files, edge_to_chunk_mapping,
                             src_column, dst_column, edge, adj_lst->GetType(), 
                             updated_edge_info->GetPropertyGroup(pg.properties[0].name),
-                            pg_data_table, edge_writer, vertex_prop_index_map, num_threads);
+                            pg_data_table, edge_writer, vertex_prop_index_map, num_threads_build);
             }
         }
 
@@ -1506,10 +1513,12 @@ void MergeEdges(MergeConfig& merge_config,
 
 } // namespace
 
-std::string DoMerge(const py::dict& config_dict)
+std::string DoMerge(const py::dict& config_dict, const py::dict& settings_dict)
 {
     logger("Mege started");
-    size_t num_threads = omp_get_max_threads() / 2;
+
+    SettingsConfig settings_config;
+    settings_config.fill(settings_dict);
 
     // get config data
     MergeConfig merge_config;
@@ -1519,7 +1528,7 @@ std::string DoMerge(const py::dict& config_dict)
 
     // 1. Add attributes to vertices
     logger("Processing vertices");
-    MergeVertices(merge_config, num_threads);
+    MergeVertices(merge_config, settings_config);
 
     // 2. Prepare to add attributes to edges
     logger("Processing edges.");
@@ -1537,7 +1546,7 @@ std::string DoMerge(const py::dict& config_dict)
                                 vertex_prop_index_map, merge_config.graphar_config.path);
 
     // 3. Add attributes to edges
-    MergeEdges(merge_config, graph_info, vertex_prop_index_map, num_threads);
+    MergeEdges(merge_config, graph_info, vertex_prop_index_map, settings_config);
 
     return "Merged successfully!";
 }

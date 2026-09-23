@@ -1,0 +1,33 @@
+adj_lists: 
+  - aligned_by: src
+    file_type: parquet
+    ordered: true
+    prefix: ordered_by_source/
+  - aligned_by: dst
+    file_type: parquet
+    ordered: true
+    prefix: ordered_by_dest/
+chunk_size: 20
+directed: true
+dst_chunk_size: 10
+dst_type: movie
+edge_type: rated
+prefix: edge/person_rated_movie/
+property_groups: 
+  - file_type: parquet
+    prefix: rating/
+    properties: 
+      - data_type: int32
+        is_nullable: true
+        is_primary: false
+        name: rating
+  - file_type: parquet
+    prefix: review/
+    properties: 
+      - data_type: string
+        is_nullable: true
+        is_primary: false
+        name: review
+src_chunk_size: 10
+src_type: person
+version: gar/v1

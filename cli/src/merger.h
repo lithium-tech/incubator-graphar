@@ -6,4 +6,4 @@
 
 namespace py = pybind11;
 
-std::string DoMerge(const py::dict& config_dict);
+std::string DoMerge(const py::dict& config_dict, const py::dict& settings_dict);

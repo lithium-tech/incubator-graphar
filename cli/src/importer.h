@@ -25,4 +25,4 @@
 
 namespace py = pybind11;
 
-std::string DoImport(const py::dict& config_dict);
+std::string DoImport(const py::dict& config_dict, const py::dict& settings_dict);

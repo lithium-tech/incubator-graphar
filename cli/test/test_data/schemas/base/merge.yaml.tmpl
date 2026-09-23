@@ -1,0 +1,131 @@
+graphar:
+  path: ${GRAPHAR_RESULT}
+  name: Graph
+  tmp_path: /home/idm/s_ext.spobarueva/tmp
+  validate_level: weak
+  version: gar/v1
+  vertex_chunk_size: 10
+  edge_chunk_size: 20
+  file_type: parquet
+
+merge_schema:
+  vertices:
+    - type: person
+      property_groups:
+        - file_type: parquet
+          properties:
+            - name: passport
+              data_type: int64
+              is_primary: true
+              nullable: false
+            - name: birth_date
+              data_type: string
+              nullable: true
+      join_on: passport
+      sources:
+        - path:  ${ROOT_DIR}/cli/test/test_data/input/data/persons_perm.csv
+          columns:
+            passport: passport
+            birth_date: birth_date
+    - type: movie
+      property_groups:
+        - file_type: parquet
+          properties:
+            - name: movie_id
+              data_type: int32
+              is_primary: true
+              nullable: false
+            - name: duration_min
+              data_type: int16
+              nullable: true
+      join_on: movie_id
+      sources:
+        - path:  ${ROOT_DIR}/cli/test/test_data/input/data/movies_perm.csv
+          columns:
+            movie_id: movie_id
+            duration_min: duration_min
+  edges:
+    - edge_type: directed
+      src_type: person
+      src_prop: passport
+      src_edge_prop: passport
+      dst_type: movie
+      dst_prop: movie_id
+      dst_edge_prop: movie_id
+      prefix: edge/person_directed_movie/
+      adj_lists:
+        - ordered: true
+          aligned_by: src
+          file_type: parquet
+        - ordered: true
+          aligned_by: dst
+          file_type: parquet
+      property_groups:
+        - file_type: parquet
+          properties:
+            - name: salary
+              data_type: int32
+              is_primary: false
+              nullable: true
+      sources:
+        - path:  ${ROOT_DIR}/cli/test/test_data/input/data/directed_nulls.csv
+          columns:
+            passport: passport
+            movie_id: movie_id
+            salary: salary
+    - edge_type: rated
+      src_type: person
+      src_prop: passport
+      src_edge_prop: passport
+      dst_type: movie
+      dst_prop: movie_id
+      dst_edge_prop: movie_id
+      prefix: edge/person_rated_movie/
+      adj_lists:
+        - ordered: true
+          aligned_by: src
+          file_type: parquet
+        - ordered: true
+          aligned_by: dst
+          file_type: parquet
+      property_groups:
+        - file_type: parquet
+          properties:
+            - name: review
+              data_type: string
+              is_primary: false
+              nullable: true
+      sources:
+        - path: ${ROOT_DIR}/cli/test/test_data/input/data/rated_perm.csv
+          columns:
+            passport: passport
+            movie_id: movie_id
+            review: review
+    - edge_type: knows
+      src_type: person
+      src_prop: passport
+      src_edge_prop: person1
+      dst_type: person
+      dst_prop: passport
+      dst_edge_prop: person2
+      prefix: edge/person_knows_person/
+      adj_lists:
+        - ordered: true
+          aligned_by: src
+          file_type: parquet
+        - ordered: true
+          aligned_by: dst
+          file_type: parquet
+      property_groups:
+        - file_type: parquet
+          properties:
+            - name: edge_list
+              data_type: list<int32>
+              is_primary: false
+              nullable: true
+      sources:
+        - path:  ${ROOT_DIR}/cli/test/test_data/input/data/lists/knows_list_int32.parquet
+          columns:
+            person1: person1
+            person2: person2
+            edge_list: edge_list

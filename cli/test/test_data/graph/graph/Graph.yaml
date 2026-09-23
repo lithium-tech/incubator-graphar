@@ -1,0 +1,10 @@
+edges: 
+  - person_directed_movie.edge.yaml
+  - person_rated_movie.edge.yaml
+  - person_knows_person.edge.yaml
+name: Graph
+prefix: ./
+version: gar/v1
+vertices: 
+  - person.vertex.yaml
+  - movie.vertex.yaml
