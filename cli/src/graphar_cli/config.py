@@ -385,3 +385,80 @@ class ImportConfig(BaseModel):
                     property_group.file_type = self.graphar.file_type
 
         return self
+
+
+# ========== Add index ==========
+
+class GrapharIndexBaseConfig(BaseModel):
+    path: str
+    name: str
+
+    @field_validator("path", mode="after")
+    @classmethod
+    def check_path(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise TypeError(f"path must be str, got {type(v).__name__}")
+        p = Path(v).resolve().absolute()
+        if not p.exists():
+            raise ValueError(f"Path '{v}' does not exist.")
+        if not p.is_dir():
+            raise ValueError(f"Path '{v}' must be directory.")
+        return str(p)
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def check_name(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise TypeError(f"name must be str, got {type(v).__name__}")
+        if not v:
+            raise ValueError("name must not be empty.")
+        return v
+
+    @model_validator(mode="after")
+    def check_name_file_exists(self) -> "GrapharIndexBaseConfig":
+        yaml_file = Path(self.path) / f"{self.name}.yaml"
+        if not yaml_file.is_file():
+            raise ValueError(
+                f"File '{yaml_file}' was not found in '{self.path}'."
+            )
+        return self
+
+
+class VertexIndexConfig(BaseModel):
+    type: str
+    chunk_size: Optional[int] = None
+    properties: List[str]
+
+    @field_validator("properties", mode="after")
+    @classmethod
+    def check_properties_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("properties list must not be empty.")
+        return v
+
+    @field_validator("chunk_size", mode="after")
+    @classmethod
+    def check_chunk_size_valid(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("Chunk size must be > 0.")
+        return v
+        
+
+class EdgeIndexConfig(BaseModel):
+    type: str
+    src_type: Optional[str] = None
+    dst_type: Optional[str] = None
+    properties: List[str] = []
+
+
+class GrapharIndexConfig(BaseModel):
+    graphar: GrapharIndexBaseConfig
+    vertices: List[VertexIndexConfig]
+    edges: List[EdgeIndexConfig] = []
+
+    @field_validator("vertices", mode="after")
+    @classmethod
+    def check_vertices_not_empty(cls, v: List[VertexIndexConfig]) -> List[VertexIndexConfig]:
+        if not v:
+            raise ValueError("vertices list must not be empty.")
+        return v

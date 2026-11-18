@@ -2,15 +2,20 @@
 requires = ["scikit-build-core>=0.3.3", "pybind11", "ninja ~= 1.11"]
 build-backend = "scikit_build_core.build"
 
-
 [project]
 name = "graphar_cli"
 version = "0.0.1"
 description = "GraphAr command line tool"
 readme = "README.md"
 authors = [{ name = "GraphAr community", email = "dev@graphar.apache.org" }]
-requires-python = ">=3.7"
-dependencies = ["typer ~= 0.1", "pydantic ~= 2.0, < 2.7", "pyyaml ~= 6.0", "pyarrow ~= 24.0.0"]
+requires-python = ">=3.10"
+dependencies = [
+    "typer ~= 0.1",
+    "pydantic ~= 2.0, < 2.7",
+    "pyyaml ~= 6.0",
+    "pyarrow ~= 24.0.0",
+    "polars ~= 1.0",
+]
 
 [project.optional-dependencies]
 test = [
@@ -38,14 +43,12 @@ graphar = "graphar_cli.graphar_cli:main"
 #[tool.scikit-build.cmake]
 #build-type = "Debug"
 
-
 [tool.scikit-build]
 build-dir = "build"
 
 [tool.ruff]
 src = ["src"]
 line-length = 100
-
 
 [tool.ruff.lint]
 extend-select = [
