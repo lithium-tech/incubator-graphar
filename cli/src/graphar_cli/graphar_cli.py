@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List
 
 from graphar_cli.checker import check_graphar
+from graphar_cli.add_index import run_add_index
 from graphar_cli.gather_statistics import calculate_statistics
 
 import typer
@@ -39,7 +40,7 @@ from ._core import (  # type: ignore  # noqa: PGH003
     show_graph,
     show_vertex,
 )
-from .config import ImportConfig, MergeConfig
+from .config import ImportConfig, MergeConfig, GrapharIndexConfig
 from .importer import validate
 from .logging import setup_logging
 from .settings_parser import parse_settings, SettingsSchema, ImportSettingsSchema, MergeSettingsSchema
@@ -290,6 +291,35 @@ def check_data(
     try:
         logger.info("Gathering statistics...")
         res = calculate_statistics(config_file)
+        logger.info(res)
+    except Exception as e:
+        logger.error("Check failed: %s", e)
+        raise typer.Exit(1) from None
+
+@app.command(
+    "add-index",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="Add GraphAr index for the specified vertex attributes.",
+    no_args_is_help=True,
+)
+def add_index(
+    config_file: str = typer.Option(None, "--config", "-c", help="Path to the main GraphAr yaml.")
+):
+    if not Path(config_file).is_file():
+        logger.error("File not found: %s", config_file)
+        raise typer.Exit(1)
+
+    try:
+        with Path(config_file).open(encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        index_config = GrapharIndexConfig(**config)
+        #TODO: make validator if needed
+    except Exception as e:
+        logger.error("Invalid config: %s", e)
+        raise typer.Exit(1) from None
+    try:
+        logger.info("Starting check")
+        res = run_add_index(index_config.model_dump())
         logger.info(res)
     except Exception as e:
         logger.error("Check failed: %s", e)
